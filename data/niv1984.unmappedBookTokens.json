@@ -1,0 +1,8 @@
+{
+  "inputPath": "C:\\Users\\freez\\refiner-fire-app\\data\\Bible-1984-NIV.txt",
+  "outputVersesPath": "C:\\Users\\freez\\refiner-fire-app\\data\\niv1984.parsed.json",
+  "outputCanonicalVersesPath": "C:\\Users\\freez\\refiner-fire-app\\data\\niv1984.canonical.json",
+  "uniqueUnmappedBookTokens": [],
+  "countsByUnmappedToken": {},
+  "totalUnmappedVerses": 0
+}

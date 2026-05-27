@@ -1,0 +1,208 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover {
+  color: #535bf2;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#root {
+  width: 100%;
+  min-height: 100vh;
+}
+
+@keyframes ember-float {
+  0% {
+    transform: translate3d(0, 0, 0);
+    filter: blur(0px);
+  }
+  70% {
+    filter: blur(0.2px);
+  }
+  100% {
+    transform: translate3d(0, -110vh, 0);
+    filter: blur(0.6px);
+  }
+}
+
+.ember {
+  animation-name: ember-float;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes slow-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    filter: drop-shadow(0 0 0 rgba(255, 140, 60, 0));
+  }
+  50% {
+    opacity: 0.65;
+    filter: drop-shadow(0 0 10px rgba(255, 140, 60, 0.35));
+  }
+}
+
+.slow-pulse {
+  animation: slow-pulse 2.8s ease-in-out infinite;
+}
+
+@keyframes haze-drift {
+  0% {
+    transform: translate3d(-2%, 0%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(2%, -2%, 0) scale(1.04);
+  }
+  100% {
+    transform: translate3d(-1%, 1%, 0) scale(1);
+  }
+}
+
+@keyframes orb-drift {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, -14px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@keyframes orb-drift-reverse {
+  0% {
+    transform: translate3d(0, 0, 0);
+  }
+  50% {
+    transform: translate3d(0, 12px, 0);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+.dramatic-smoke {
+  background:
+    radial-gradient(45% 35% at 18% 30%, rgba(255, 122, 43, 0.08), transparent 70%),
+    radial-gradient(38% 32% at 78% 24%, rgba(255, 179, 94, 0.07), transparent 72%),
+    radial-gradient(55% 45% at 50% 72%, rgba(255, 88, 34, 0.06), transparent 76%);
+  filter: blur(28px);
+  animation: haze-drift 16s ease-in-out infinite alternate;
+}
+
+.slow-drift {
+  animation: orb-drift 8s ease-in-out infinite;
+}
+
+.reverse-drift {
+  animation: orb-drift-reverse 10s ease-in-out infinite;
+}
+
+.cathedral-rays {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 241, 214, 0.28) 0%,
+    rgba(255, 214, 163, 0.2) 14%,
+    rgba(255, 183, 94, 0.1) 34%,
+    rgba(255, 128, 61, 0.04) 52%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  clip-path: polygon(14% 0%, 86% 0%, 100% 100%, 0% 100%);
+  filter: blur(16px);
+  animation: haze-drift 14s ease-in-out infinite alternate;
+}
+
+.cathedral-rays-soft {
+  background: linear-gradient(
+    180deg,
+    rgba(255, 247, 228, 0.2) 0%,
+    rgba(255, 224, 176, 0.12) 20%,
+    rgba(255, 190, 122, 0.06) 40%,
+    rgba(255, 137, 79, 0.02) 58%,
+    rgba(0, 0, 0, 0) 100%
+  );
+  clip-path: polygon(22% 0%, 78% 0%, 94% 100%, 6% 100%);
+  filter: blur(28px);
+  animation: haze-drift 18s ease-in-out infinite alternate-reverse;
+}
+
+.stained-glow {
+  background:
+    radial-gradient(circle at 50% 50%, rgba(255, 243, 220, 0.3), rgba(255, 205, 126, 0.22) 34%, rgba(255, 132, 69, 0.1) 56%, transparent 76%),
+    radial-gradient(circle at 32% 40%, rgba(255, 252, 239, 0.18), transparent 42%),
+    radial-gradient(circle at 68% 36%, rgba(255, 224, 176, 0.16), transparent 40%);
+  filter: blur(20px);
+}
+
+.heavenly-crown {
+  background:
+    radial-gradient(circle at 50% 52%, rgba(255, 249, 234, 0.34), rgba(255, 226, 178, 0.22) 28%, rgba(255, 184, 112, 0.12) 48%, rgba(255, 120, 61, 0.04) 68%, transparent 78%),
+    radial-gradient(circle at 22% 58%, rgba(255, 247, 226, 0.14), transparent 38%),
+    radial-gradient(circle at 78% 58%, rgba(255, 236, 202, 0.14), transparent 38%);
+  filter: blur(20px);
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+button {
+  border-radius: 8px;
+  border: 1px solid transparent;
+  padding: 0.6em 1.2em;
+  font-size: 1em;
+  font-weight: 500;
+  font-family: inherit;
+  background-color: #1a1a1a;
+  cursor: pointer;
+  transition: border-color 0.25s;
+}
+button:hover {
+  border-color: #646cff;
+}
+button:focus,
+button:focus-visible {
+  outline: 4px auto -webkit-focus-ring-color;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+  a:hover {
+    color: #747bff;
+  }
+  button {
+    background-color: #f9f9f9;
+  }
+}
