@@ -65,16 +65,6 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
 
   const feedbackLabel = feedback === 'correct' ? 'Correct' : feedback === 'incorrect' ? 'Wrong' : null;
 
-  // --- HELPER ---
-  // shuffleArray imported
-
-  // --- FULL GAME DATA REPOSITORY ---
-  // gameData imported
-
-  // --- CONFIG ---
-  // acts imported
-  // chapters imported
-
   // --- MULTIPLAYER LOGIC ---
   const generateRoomCode = () => Math.random().toString(36).substring(2, 6).toUpperCase();
 
@@ -84,7 +74,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     setRoomCode(code);
     setIsHost(true);
 
-    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', code);
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', code);
     await setDoc(sessionRef, {
       hostId: user.uid,
       status: 'waiting', 
@@ -97,7 +87,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
 
   const joinSession = async () => {
     if (!user || !playerName || !roomCode) return alert("Please enter name and code!");
-    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     const sessionSnap = await getDoc(sessionRef);
     if (sessionSnap.exists()) {
       setIsHost(false);
@@ -112,13 +102,13 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
 
   useEffect(() => {
     if (appState === 'multiplayer_room' && roomCode && db) {
-      const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+      const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
       const unsub = onSnapshot(sessionRef, (doc) => {
         if (doc.exists()) setRoomData(doc.data());
       });
       return () => unsub();
     }
-  }, [appState, roomCode, db, appId]);
+  }, [appState, roomCode, appId]);
 
   useEffect(() => {
     if (appState === 'multiplayer_room' && roomData?.status === 'playing' && roomData?.chapterId) {
@@ -128,7 +118,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
         setActiveQuestions(processed);
       }
     }
-  }, [roomData?.chapterId, roomData?.status, appState, gameData]);
+  }, [roomData?.chapterId, roomData?.status, appState]);
 
   useEffect(() => {
     if (appState === 'multiplayer_room' && roomData?.questionIndex !== undefined) {
@@ -141,7 +131,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
 
   const mpStartGame = async () => {
     if (!roomData) return;
-    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     const questions = gameData[roomData.chapterId]?.blanks || [];
     await updateDoc(sessionRef, { status: 'playing', questionIndex: 0, totalQuestions: questions.length });
   };
@@ -151,7 +141,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     const currentQ = activeQuestions[roomData.questionIndex];
     const isCorrect = answer === currentQ.blank;
     setMpFeedback(isCorrect ? 'correct' : 'incorrect');
-    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
 
     const currentScore = roomData.players[user.uid]?.score || 0;
     const updatedPlayer = { ...roomData.players[user.uid], score: currentScore + (isCorrect ? 100 : 0) };
@@ -161,13 +151,13 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const mpNextQuestion = async () => {
     if (!roomData) return;
     const nextIdx = roomData.questionIndex + 1;
-    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     if (nextIdx >= activeQuestions.length) await updateDoc(sessionRef, { status: 'finished' });
     else await updateDoc(sessionRef, { questionIndex: nextIdx });
   };
 
   const mpSelectChapter = async (chapId: any) => {
-    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     await updateDoc(sessionRef, { chapterId: chapId });
   }
 
@@ -421,7 +411,6 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
               <h2 className="text-4xl font-black text-white tracking-tight uppercase">{selectedChapter?.title}</h2>
               <p className="text-orange-300 font-mono tracking-widest text-xs uppercase">{selectedChapter?.desc}</p>
               <p className="text-slate-500 text-sm mt-2">{selectedChapter?.ref}</p>
-
             </div>
             <div className="w-full rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
               <div className="rounded-2xl border border-white/5 bg-black/30 p-6">
@@ -439,7 +428,6 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
         {appState === 'playing' && (
            <div className="w-full flex flex-col items-center animate-in fade-in duration-500">
               <div className="w-full max-w-xs h-1 bg-slate-800 rounded-full mb-8 overflow-hidden"><div className="h-full bg-orange-500 transition-all duration-500 ease-out" style={{ width: `${((currentLevel) / activeQuestions.length) * 100}%` }}></div></div>
-              {/* Note: I'm reusing the existing render functions here. You don't need to change them, but ensure they are present in your file */}
               {gameMode === 'blanks' && (
                 <div className="w-full max-w-2xl rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
                   <div className="rounded-2xl border border-white/5 bg-black/30 p-6 sm:p-8 relative overflow-hidden text-center">
@@ -450,7 +438,6 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                   </div>
                 </div>
               )}
-              {/* Other modes use similar structure, check previous code for full render blocks if needed */}
               {gameMode === 'tf' && (
                 <div className="w-full max-w-lg bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl text-center">
                   <div className="mb-6"><span className="text-green-400 font-mono text-xs uppercase tracking-widest bg-green-950/30 px-3 py-1 rounded-full border border-green-900/50">Rev {activeQuestions[currentLevel].verse}</span></div>
