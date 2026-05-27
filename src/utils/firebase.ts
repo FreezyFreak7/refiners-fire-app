@@ -12,15 +12,6 @@ const firebaseConfig = {
   measurementId: "G-435MHGNLOH"
 };
 
-let auth: Auth | undefined;
-let db: Firestore | undefined;
-
-try {
-  const app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
-} catch (e) {
-  console.warn('Firebase Error:', e);
-}
-
-export { auth, db };
+const app = initializeApp(firebaseConfig);
+export const auth: Auth = getAuth(app);
+export const db: Firestore = getFirestore(app);
