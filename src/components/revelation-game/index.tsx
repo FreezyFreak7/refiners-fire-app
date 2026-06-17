@@ -8,6 +8,21 @@ import { acts } from '../../data/acts';
 import { chapters } from '../../data/chapters';
 import { shuffleArray } from '../../utils/helpers';
 
+type Difficulty = 'easy' | 'normal' | 'sealed';
+
+const revelationDifficultyConfig: Record<Difficulty, { label: string; blurb: string; accent: string; options: number }> = {
+  easy: { label: 'Easy', blurb: 'Fewer answer choices to weigh.', accent: 'green', options: 3 },
+  normal: { label: 'Normal', blurb: 'A balanced set of choices.', accent: 'orange', options: 4 },
+  sealed: { label: 'Sealed', blurb: 'Every decoy is in play.', accent: 'red', options: 6 },
+};
+
+const modeLabels: Record<string, string> = {
+  blanks: 'Fill Blanks',
+  builder: 'Builder',
+  tf: 'True or Lie',
+  guess_verse: 'Reference',
+};
+
 const actIconMap: Record<string, React.ComponentType<any>> = {
   Mail,
   Scroll,
@@ -34,11 +49,13 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
 
   // --- STATE MANAGEMENT ---
   const [appState, setAppState] = useState<
-    'actSelect' | 'chapterSelect' | 'menu' | 'playing' | 'finished' | 'lobby' | 'multiplayer_room'
+    'actSelect' | 'chapterSelect' | 'menu' | 'difficulty' | 'playing' | 'finished' | 'lobby' | 'multiplayer_room'
   >(initialAppState);
   const [selectedAct, setSelectedAct] = useState<any>(null);
   const [selectedChapter, setSelectedChapter] = useState<any>(null);
   const [gameMode, setGameMode] = useState<'blanks' | 'builder' | 'tf' | 'guess_verse' | null>(null);
+  const [pendingMode, setPendingMode] = useState<'blanks' | 'builder' | 'tf' | 'guess_verse' | null>(null);
+  const [gameDifficulty, setGameDifficulty] = useState<Difficulty>('normal');
   
   // Single Player State
   const [currentLevel, setCurrentLevel] = useState(0);
@@ -173,9 +190,17 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     setAppState('menu');
   };
 
-  const startGame = (mode: any) => {
+  const selectMode = (mode: any) => {
     if (!selectedChapter) return;
+    setPendingMode(mode);
+    setAppState('difficulty');
+  };
+
+  const startGame = (mode: any, difficulty: Difficulty) => {
+    if (!selectedChapter) return;
+    const optionCount = revelationDifficultyConfig[difficulty].options;
     setGameMode(mode);
+    setGameDifficulty(difficulty);
     setScore(0);
     setStreak(0);
 
@@ -189,10 +214,16 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     const safeTF = churchData.tf && churchData.tf.length ? churchData.tf : [{ verse: "?", text: "No data", isTrue: true, explanation: "" }];
     const safeBuilder = churchData.builder && churchData.builder.length ? churchData.builder : [{ verse: "?", chunks: ["No", "data"] }];
 
-    if (mode === 'blanks') setActiveQuestions(shuffleArray(safeBlanks.map((q: any) => ({ ...q, options: shuffleArray([q.blank, ...((q.options || []).filter((opt: any) => opt !== q.blank))]) }))));
+    if (mode === 'blanks') setActiveQuestions(shuffleArray(safeBlanks.map((q: any) => {
+      const distractors = shuffleArray((q.options || []).filter((opt: any) => opt !== q.blank)).slice(0, Math.max(1, optionCount - 1));
+      return { ...q, options: shuffleArray([q.blank, ...distractors]) };
+    })));
     else if (mode === 'tf') setActiveQuestions(shuffleArray([...safeTF]));
     else if (mode === 'builder') { setActiveQuestions([...safeBuilder]); initializeBuilderLevel(0, safeBuilder); }
-    else if (mode === 'guess_verse') setActiveQuestions(shuffleArray(safeBlanks.map((q: any) => ({ text: q.textBefore + " " + q.blank + " " + q.textAfter, correct: q.verse, options: shuffleArray([q.verse, "1:1", "2:2", "3:3"]) }))));
+    else if (mode === 'guess_verse') setActiveQuestions(shuffleArray(safeBlanks.map((q: any) => {
+      const decoys = shuffleArray(["1:1", "2:2", "3:3", "4:4", "5:5", "6:6"].filter((d) => d !== q.verse)).slice(0, Math.max(1, optionCount - 1));
+      return { text: q.textBefore + " " + q.blank + " " + q.textAfter, correct: q.verse, options: shuffleArray([q.verse, ...decoys]) };
+    })));
   };
 
   const initializeBuilderLevel = (index: any, source: any) => {
@@ -415,10 +446,41 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
             <div className="w-full rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
               <div className="rounded-2xl border border-white/5 bg-black/30 p-6">
                 <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => startGame('blanks')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><BookOpen className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
-                  <button onClick={() => startGame('builder')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><Layers className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
-                  <button onClick={() => startGame('tf')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
-                  <button onClick={() => startGame('guess_verse')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
+                  <button onClick={() => selectMode('blanks')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><BookOpen className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
+                  <button onClick={() => selectMode('builder')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><Layers className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
+                  <button onClick={() => selectMode('tf')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
+                  <button onClick={() => selectMode('guess_verse')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {appState === 'difficulty' && pendingMode && (
+          <div className="w-full space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
+            <button onClick={() => setAppState('menu')} className="inline-flex items-center gap-2 mb-4 rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm font-black text-slate-200 transition-colors hover:bg-white/5 hover:border-orange-500/30"><ChevronRight className="rotate-180 text-orange-300" size={16}/> Back to Modes</button>
+            <div className="text-center space-y-2 mb-8">
+              <p className="text-orange-300 font-mono tracking-widest text-xs uppercase">{modeLabels[pendingMode]}</p>
+              <h2 className="text-4xl font-black text-white tracking-tight uppercase">Choose Your Level</h2>
+              <p className="text-slate-500 text-sm mt-2">Set the challenge before you begin this run.</p>
+            </div>
+            <div className="w-full rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
+              <div className="rounded-2xl border border-white/5 bg-black/30 p-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {(['easy', 'normal', 'sealed'] as Difficulty[]).map((level) => {
+                    const cfg = revelationDifficultyConfig[level];
+                    const ring =
+                      cfg.accent === 'green' ? 'hover:border-green-500/50 text-green-300'
+                      : cfg.accent === 'red' ? 'hover:border-red-500/50 text-red-300'
+                      : 'hover:border-orange-500/50 text-orange-300';
+                    return (
+                      <button key={level} onClick={() => startGame(pendingMode, level)} className={`group relative flex flex-col gap-2 rounded-2xl border border-white/10 bg-black/20 p-5 text-left transition-all hover:bg-white/5 ${ring}`}>
+                        <div className="text-[10px] font-black uppercase tracking-[0.35em] opacity-80">Level</div>
+                        <h3 className="text-2xl font-black text-white">{cfg.label}</h3>
+                        <p className="text-xs text-slate-400 leading-snug">{cfg.blurb}</p>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

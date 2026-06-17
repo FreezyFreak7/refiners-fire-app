@@ -37,6 +37,47 @@ body {
   min-height: 100vh;
 }
 
+/* --- Launch animation --- */
+@keyframes rf-launch-out {
+  0% { opacity: 1; visibility: visible; }
+  100% { opacity: 0; visibility: hidden; }
+}
+
+@keyframes rf-flame-rise {
+  0% { transform: translateY(28px) scale(0.4); opacity: 0; filter: drop-shadow(0 0 0 rgba(255, 140, 60, 0)); }
+  55% { transform: translateY(0) scale(1.12); opacity: 1; filter: drop-shadow(0 0 28px rgba(255, 150, 70, 0.85)); }
+  100% { transform: translateY(0) scale(1); opacity: 1; filter: drop-shadow(0 0 18px rgba(255, 140, 60, 0.55)); }
+}
+
+@keyframes rf-ring-expand {
+  0% { transform: scale(0.2); opacity: 0.85; }
+  100% { transform: scale(2.6); opacity: 0; }
+}
+
+@keyframes rf-title-in {
+  0% { opacity: 0; transform: translateY(16px); letter-spacing: 0.4em; }
+  100% { opacity: 1; transform: translateY(0); letter-spacing: -0.01em; }
+}
+
+@keyframes rf-tagline-in {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.rf-launch {
+  animation: rf-launch-out 0.7s ease-in forwards;
+  animation-delay: 2.5s;
+}
+.rf-launch-flame { animation: rf-flame-rise 1.1s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.rf-launch-ring { animation: rf-ring-expand 1.6s ease-out 0.25s both; }
+.rf-launch-title { animation: rf-title-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.45s both; }
+.rf-launch-tagline { animation: rf-tagline-in 0.8s ease-out 1.05s both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .rf-launch { animation-delay: 1.2s; }
+  .rf-launch-flame, .rf-launch-ring, .rf-launch-title, .rf-launch-tagline { animation-duration: 0.01s; animation-delay: 0s; }
+}
+
 @keyframes ember-float {
   0% {
     transform: translate3d(0, 0, 0);

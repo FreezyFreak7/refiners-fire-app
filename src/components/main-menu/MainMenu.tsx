@@ -24,6 +24,7 @@ type MenuItemId =
 const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth, onLogout }) => {
   const [activeId, setActiveId] = useState<MenuItemId>('start_old_testament');
   const [panel, setPanel] = useState<null | 'how' | 'settings' | 'credits'>(null);
+  const [tab, setTab] = useState<'libraries' | 'live'>('libraries');
 
   const items = useMemo(() => {
     const base: { id: MenuItemId; label: string; icon: React.ReactNode }[] = [
@@ -32,7 +33,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
       { id: 'start_new_testament', label: 'New Testament Library', icon: <BookOpen size={18} /> },
       { id: 'start_revelation', label: 'Revelation Library', icon: <ScrollText size={18} /> },
       { id: 'start_alpha_omega', label: 'Alpha and Omega Library', icon: <Sparkles size={18} /> },
-      { id: 'start_live_group', label: 'Live Group Study', icon: <Radio size={18} /> },
     ];
 
     return base;
@@ -53,6 +53,14 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
   const onKeyDown = async (e: React.KeyboardEvent) => {
     if (panel) {
       if (e.key === 'Escape') setPanel(null);
+      return;
+    }
+
+    if (tab === 'live') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        onSelectMode('live_group');
+      }
       return;
     }
 
@@ -122,6 +130,30 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
             <div className="mt-4 text-xs font-black uppercase tracking-[0.35em] text-slate-400">A DRAMATIC BIBLE CHALLENGE, FORGED IN REVELATION.</div>
           </div>
 
+        <div className="mb-4 grid w-full max-w-xl grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-black/30 p-1.5">
+          <button
+            type="button"
+            onClick={() => setTab('libraries')}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.2em] transition-colors ${
+              tab === 'libraries' ? 'bg-orange-500/15 text-orange-200 shadow-[0_0_0_1px_rgba(255,120,60,0.25)]' : 'text-slate-400 hover:bg-white/5'
+            }`}
+          >
+            <BookOpen size={16} className={tab === 'libraries' ? 'text-orange-300' : 'text-slate-500'} />
+            Libraries
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('live')}
+            className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.2em] transition-colors ${
+              tab === 'live' ? 'bg-orange-500/15 text-orange-200 shadow-[0_0_0_1px_rgba(255,120,60,0.25)]' : 'text-slate-400 hover:bg-white/5'
+            }`}
+          >
+            <Radio size={16} className={tab === 'live' ? 'text-orange-300' : 'text-slate-500'} />
+            Live Group Study
+          </button>
+        </div>
+
+        {tab === 'libraries' ? (
         <div className="w-full max-w-xl rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
           <div className="rounded-2xl border border-white/5 bg-black/30 p-6">
             <div className="mb-3 text-xs font-bold uppercase tracking-[0.35em] text-slate-500">SELECT LIBRARY</div>
@@ -173,6 +205,26 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
             </div>
           </div>
         </div>
+        ) : (
+        <div className="w-full max-w-xl rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
+          <div className="rounded-2xl border border-white/5 bg-black/30 p-8 text-center">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-400/30 bg-orange-500/15 text-orange-300 shadow-[0_20px_60px_-20px_rgba(249,115,22,0.55)]">
+              <Radio size={30} />
+            </div>
+            <h2 className="text-2xl font-black text-white">Live Group Study</h2>
+            <p className="mx-auto mt-2 max-w-sm text-sm text-slate-400">
+              Host a room or join friends with a room code and race through verse challenges together in real time.
+            </p>
+            <button
+              type="button"
+              onClick={() => onSelectMode('live_group')}
+              className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-400/30 bg-orange-600 px-6 py-3 text-sm font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500"
+            >
+              <Radio size={16} /> Enter Live Study
+            </button>
+          </div>
+        </div>
+        )}
 
         <div className="mt-8 flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-center">
           <button

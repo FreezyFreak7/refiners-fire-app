@@ -5,11 +5,13 @@ import MemoryGame from './components/memory-game/GameifiedMemoryGame';
 import MainMenu from './components/main-menu/MainMenu';
 import AuthModal from './components/main-menu/AuthModal';
 import BackgroundShell from './components/main-menu/BackgroundShell';
+import LaunchAnimation from './components/main-menu/LaunchAnimation';
 import { auth } from './utils/firebase';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<'old_testament' | 'gospels' | 'new_testament' | 'revelation' | 'alpha_omega' | 'live_group' | null>(null);
 
+  const [showLaunch, setShowLaunch] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authModalOpen, setAuthModalOpen] = useState(false);
@@ -48,6 +50,10 @@ const App: React.FC = () => {
   };
 
   const isMember = !!user && !user.isAnonymous;
+
+  if (showLaunch) {
+    return <LaunchAnimation onComplete={() => setShowLaunch(false)} />;
+  }
 
   if (!mode) {
     return (

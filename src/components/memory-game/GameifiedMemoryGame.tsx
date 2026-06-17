@@ -34,7 +34,7 @@ type CustomCollection = {
 type BibleData = Record<string, Record<string, Record<string, string>>>;
 type VerseLookupResult = { ref: string; text: string };
 type GameMode = 'blanks' | 'builder' | 'tf' | 'reference';
-type AppState = 'library' | 'menu' | 'playing' | 'finished';
+type AppState = 'library' | 'menu' | 'difficulty' | 'playing' | 'finished';
 
 type BlanksQuestion = {
   kind: 'blanks';
@@ -77,37 +77,110 @@ type BuilderState = {
 const bibleData = niv1984Canonical as BibleData;
 const createCollectionId = () => `collection_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-const defaultOldTestamentReferences = [
-  'Genesis 1:1-5', 'Genesis 12:1-3', 'Exodus 14:13-14', 'Deuteronomy 6:4-9', 'Joshua 1:8-9',
-  '1 Samuel 16:7', '2 Chronicles 7:14', 'Job 19:25-27', 'Psalm 1:1-3', 'Psalm 23:1-4',
-  'Psalm 46:1-3', 'Psalm 119:105', 'Proverbs 3:5-6', 'Proverbs 30:7-8', 'Ecclesiastes 3:1-8',
-  'Isaiah 9:6-7', 'Isaiah 40:28-31', 'Isaiah 53:4-6', 'Jeremiah 29:11-13', 'Lamentations 3:22-23',
-  'Ezekiel 36:26-27', 'Daniel 2:44', 'Micah 6:8', 'Habakkuk 2:14', 'Malachi 3:1'
-];
+// Canonical book order so each library can draw at random from the right slice of Scripture.
+const ALL_BOOKS = Object.keys(bibleData);
+const OLD_TESTAMENT_BOOKS = ALL_BOOKS.slice(0, 39);
+const NEW_TESTAMENT_BOOKS = ALL_BOOKS.slice(39);
+const GOSPEL_BOOKS = ['Matthew', 'Mark', 'Luke', 'John'].filter((book) => book in bibleData);
 
-const defaultGospelsReferences = [
-  'Matthew 5:3-12', 'Matthew 5:13-16', 'Matthew 6:9-13', 'Matthew 6:19-21', 'Matthew 7:7-8',
-  'Matthew 11:28-30', 'Matthew 22:37-39', 'Matthew 28:18-20', 'Mark 1:14-15', 'Mark 8:34-35',
-  'Mark 10:45', 'Mark 12:29-31', 'Luke 2:10-11', 'Luke 4:18-19', 'Luke 6:27-28',
-  'Luke 9:23-24', 'Luke 11:9-10', 'Luke 15:4-7', 'Luke 19:10', 'John 3:16-17',
-  'John 4:23-24', 'John 8:12', 'John 10:10-11', 'John 11:25-26', 'John 13:34-35',
-  'John 14:1-3', 'John 15:5', 'John 15:12-13', 'John 17:17', 'John 20:31',
-  'Matthew 4:4', 'Luke 18:27', 'John 6:35', 'John 7:37-38', 'John 16:13',
-];
+type Difficulty = 'easy' | 'normal' | 'sealed';
 
-const defaultNewTestamentReferences = [
-  'Acts 1:8', 'Acts 4:12', 'Romans 5:8', 'Romans 8:28', 'Romans 12:1-2',
-  '1 Corinthians 10:13', '1 Corinthians 13:4-7', '2 Corinthians 5:17', 'Galatians 2:20', 'Ephesians 2:8-10',
-  'Ephesians 4:21-24', 'Philippians 4:6-7', 'Colossians 3:12-14', '1 Thessalonians 4:16-17', '2 Timothy 3:16-17',
-  'Hebrews 11:1', 'Hebrews 12:1-2', 'James 1:22', '1 Peter 5:7', '1 John 1:9',
-  '1 John 4:7-8', 'Jude 1:24-25', 'Revelation 1:7', 'Revelation 14:12', 'Revelation 22:12-13'
-];
-const defaultAlphaOmegaReferences = [
-  ...defaultOldTestamentReferences,
-  ...defaultGospelsReferences,
-  ...defaultNewTestamentReferences,
-  'Revelation 3:20', 'Revelation 12:10-11', 'Revelation 19:11-16', 'Revelation 21:5-7', 'Revelation 22:17'
-];
+type DifficultySettings = {
+  label: string;
+  blurb: string;
+  accent: string;
+  blanks: number;
+  options: number;
+  refOptions: number;
+  wordsPerChunk: number;
+  minWords: number;
+  maxWords: number;
+};
+
+const difficultyConfig: Record<Difficulty, DifficultySettings> = {
+  easy: {
+    label: 'Easy',
+    blurb: 'Shorter verses, fewer blanks, more help.',
+    accent: 'green',
+    blanks: 1,
+    options: 4,
+    refOptions: 3,
+    wordsPerChunk: 4,
+    minWords: 6,
+    maxWords: 18,
+  },
+  normal: {
+    label: 'Normal',
+    blurb: 'A balanced run for steady practice.',
+    accent: 'orange',
+    blanks: 2,
+    options: 5,
+    refOptions: 4,
+    wordsPerChunk: 3,
+    minWords: 8,
+    maxWords: 30,
+  },
+  sealed: {
+    label: 'Sealed',
+    blurb: 'Longer verses, maximum blanks, no mercy.',
+    accent: 'red',
+    blanks: 4,
+    options: 6,
+    refOptions: 6,
+    wordsPerChunk: 2,
+    minWords: 14,
+    maxWords: 70,
+  },
+};
+
+const modeLabels: Record<GameMode, string> = {
+  blanks: 'Fill Blanks',
+  builder: 'Builder',
+  tf: 'True or Lie',
+  reference: 'Reference',
+};
+
+const countWords = (text: string) => text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).length;
+
+// Draw `count` random single verses from the given books, preferring verses inside the
+// requested word-length window so the difficulty actually changes how hard the round feels.
+const sampleRandomVerses = (books: string[], count: number, minWords: number, maxWords: number): VerseRecord[] => {
+  const results: VerseRecord[] = [];
+  const seen = new Set<string>();
+  const pool = books.filter((book) => bibleData[book]);
+  if (!pool.length) return results;
+
+  const tryPick = (enforceWindow: boolean) => {
+    const book = pool[Math.floor(Math.random() * pool.length)];
+    const chapters = bibleData[book];
+    const chapterKeys = Object.keys(chapters);
+    const chapter = chapterKeys[Math.floor(Math.random() * chapterKeys.length)];
+    const verseKeys = Object.keys(chapters[chapter]);
+    const verse = verseKeys[Math.floor(Math.random() * verseKeys.length)];
+    const ref = `${book} ${chapter}:${verse}`;
+    if (seen.has(ref)) return;
+    const text = chapters[chapter][verse].replace(/\s+/g, ' ').trim();
+    if (!text) return;
+    const words = countWords(text);
+    if (enforceWindow && (words < minWords || words > maxWords)) return;
+    if (words < 4) return; // too short for any game mode
+    seen.add(ref);
+    results.push({ ref, text });
+  };
+
+  let attempts = 0;
+  while (results.length < count && attempts < count * 80) {
+    attempts += 1;
+    tryPick(true);
+  }
+  // Relax the length window if the strict pass came up short, so a round never starts empty.
+  attempts = 0;
+  while (results.length < count && attempts < count * 80) {
+    attempts += 1;
+    tryPick(false);
+  }
+  return results;
+};
 
 const shuffleArray = <T,>(items: T[]) => {
   const next = [...items];
@@ -180,7 +253,7 @@ const normalizeVerseRef = (raw: string) => {
   return `${normalizedBook} ${rest}`;
 };
 
-const createBlankedQuestion = (verse: VerseRecord): BlanksQuestion => {
+const createBlankedQuestion = (verse: VerseRecord, targetBlanks: number): BlanksQuestion => {
   const words = verse.text.replace(/\s+/g, ' ').trim().split(' ');
   const meaningfulIndexes = words
     .map((word, index) => ({
@@ -189,7 +262,7 @@ const createBlankedQuestion = (verse: VerseRecord): BlanksQuestion => {
     }))
     .filter(({ clean }) => clean.length >= 4);
 
-  const blankCount = meaningfulIndexes.length >= 18 ? 4 : meaningfulIndexes.length >= 10 ? 3 : 2;
+  const blankCount = Math.max(1, Math.min(targetBlanks, meaningfulIndexes.length || 1));
 
   const selectedIndexes = meaningfulIndexes
     .filter(({ index }) => index > 0 && index < words.length - 1)
@@ -237,16 +310,19 @@ const createBlankedQuestion = (verse: VerseRecord): BlanksQuestion => {
   };
 };
 
-const createBuilderQuestion = (verse: VerseRecord): BuilderQuestion => {
-  const rawChunks = verse.text
-    .split(/(?<=[,.;!?])\s+|\s+(?=and\s|for\s|that\s|who\s|because\s)/)
-    .map((chunk) => chunk.trim())
+const createBuilderQuestion = (verse: VerseRecord, wordsPerChunk: number): BuilderQuestion => {
+  const size = Math.max(1, wordsPerChunk);
+  const chunks = verse.text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .filter(Boolean)
+    .reduce<string[]>((acc, word, index) => {
+      const bucket = Math.floor(index / size);
+      acc[bucket] = acc[bucket] ? `${acc[bucket]} ${word}` : word;
+      return acc;
+    }, [])
     .filter(Boolean);
-  const chunks = rawChunks.length >= 3 ? rawChunks.slice(0, 6) : verse.text.split(/\s+/).reduce<string[]>((acc, word, index) => {
-    const bucket = Math.floor(index / 3);
-    acc[bucket] = acc[bucket] ? `${acc[bucket]} ${word}` : word;
-    return acc;
-  }, []).filter(Boolean);
   return { kind: 'builder', verse, chunks };
 };
 
@@ -272,15 +348,16 @@ const createTfQuestion = (verse: VerseRecord, index: number, versePool: VerseRec
   };
 };
 
-const createReferenceQuestion = (verse: VerseRecord, versePool: VerseRecord[]): ReferenceQuestion => {
-  const distractors = shuffleArray(versePool.filter((item) => item.ref !== verse.ref).map((item) => item.ref)).slice(0, 3);
-  while (distractors.length < 3) distractors.push('John 1:1');
+const createReferenceQuestion = (verse: VerseRecord, versePool: VerseRecord[], optionCount: number): ReferenceQuestion => {
+  const distractorCount = Math.max(1, optionCount - 1);
+  const distractors = shuffleArray(versePool.filter((item) => item.ref !== verse.ref).map((item) => item.ref)).slice(0, distractorCount);
+  while (distractors.length < distractorCount) distractors.push(`John ${distractors.length + 1}:1`);
   return {
     kind: 'reference',
     verse,
     prompt: generateVersePreview(verse.text),
     correct: verse.ref,
-    options: shuffleArray([verse.ref, ...distractors.slice(0, 3)]),
+    options: shuffleArray([verse.ref, ...distractors.slice(0, distractorCount)]),
   };
 };
 
@@ -297,6 +374,8 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
   const [appState, setAppState] = useState<AppState>('menu');
   const [activeSetId, setActiveSetId] = useState<string>(initialSetId);
   const [activeMode, setActiveMode] = useState<GameMode | null>(null);
+  const [pendingMode, setPendingMode] = useState<GameMode | null>(null);
+  const [activeDifficulty, setActiveDifficulty] = useState<Difficulty>('normal');
   const [activeQuestions, setActiveQuestions] = useState<Question[]>([]);
   const [currentLevel, setCurrentLevel] = useState(0);
   const [score, setScore] = useState(0);
@@ -348,38 +427,48 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
       translation: 'NIV 1984',
       verses: collection.verses,
       isCustom: true,
+      random: false,
+      books: [] as string[],
     })),
     {
       id: 'old_testament',
       title: 'Old Testament Library',
-      subtitle: 'Law, wisdom, prophets, and foundational passages',
+      subtitle: 'Random draw from Genesis to Malachi',
       translation: 'NIV 1984',
-      verses: buildVerseRecords(defaultOldTestamentReferences),
+      verses: [] as VerseRecord[],
       isCustom: false,
+      random: true,
+      books: OLD_TESTAMENT_BOOKS,
     },
     {
       id: 'gospels',
       title: 'The Gospels Library',
-      subtitle: 'Teachings, mission, prayer, and discipleship',
+      subtitle: 'Random draw from Matthew, Mark, Luke & John',
       translation: 'NIV 1984',
-      verses: buildVerseRecords(defaultGospelsReferences),
+      verses: [] as VerseRecord[],
       isCustom: false,
+      random: true,
+      books: GOSPEL_BOOKS,
     },
     {
       id: 'new_testament',
       title: 'New Testament Library',
-      subtitle: 'Acts, letters, endurance, and church life',
+      subtitle: 'Random draw from Matthew to Revelation',
       translation: 'NIV 1984',
-      verses: buildVerseRecords(defaultNewTestamentReferences),
+      verses: [] as VerseRecord[],
       isCustom: false,
+      random: true,
+      books: NEW_TESTAMENT_BOOKS,
     },
     {
       id: 'alpha_omega',
       title: 'Alpha and Omega Library',
-      subtitle: 'A mixed run from Genesis to Revelation',
+      subtitle: 'Random draw from Genesis to Revelation',
       translation: 'NIV 1984',
-      verses: buildVerseRecords(defaultAlphaOmegaReferences),
+      verses: [] as VerseRecord[],
       isCustom: false,
+      random: true,
+      books: ALL_BOOKS,
     },
   ], [customCollections, isMember]);
 
@@ -431,22 +520,37 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     });
   };
 
-  const startGame = (mode: GameMode) => {
-    if (!activeSet?.verses?.length) return;
-    const versePool = shuffleArray(activeSet.verses).slice(0, Math.min(activeSet.verses.length, 12));
+  const selectMode = (mode: GameMode) => {
+    if (!activeSet) return;
+    setPendingMode(mode);
+    setAppState('difficulty');
+  };
+
+  const startGame = (mode: GameMode, difficulty: Difficulty) => {
+    if (!activeSet) return;
+    const cfg = difficultyConfig[difficulty];
+
+    // Random libraries pull a fresh draw from Scripture each round; custom collections use their saved verses.
+    const versePool = activeSet.random
+      ? sampleRandomVerses(activeSet.books, 10, cfg.minWords, cfg.maxWords)
+      : shuffleArray(activeSet.verses).slice(0, Math.min(activeSet.verses.length, 12));
+
+    if (!versePool.length) return;
+
     const questions: Question[] = versePool.map((verse, index) => {
       switch (mode) {
         case 'blanks':
-          return createBlankedQuestion(verse);
+          return createBlankedQuestion(verse, cfg.blanks);
         case 'builder':
-          return createBuilderQuestion(verse);
+          return createBuilderQuestion(verse, cfg.wordsPerChunk);
         case 'tf':
           return createTfQuestion(verse, index, versePool);
         case 'reference':
-          return createReferenceQuestion(verse, versePool);
+          return createReferenceQuestion(verse, versePool, cfg.refOptions);
       }
     });
     setActiveMode(mode);
+    setActiveDifficulty(difficulty);
     setActiveQuestions(questions);
     setCurrentLevel(0);
     setScore(0);
@@ -559,10 +663,10 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
         (opt) =>
           opt.toLowerCase() !== expected.toLowerCase() &&
           !blankGuesses.some((guess) => guess.toLowerCase() === opt.toLowerCase())
-      ).slice(0, 5),
+      ).slice(0, Math.max(1, difficultyConfig[activeDifficulty].options - 1)),
     ].filter(Boolean) as string[];
     return shuffleArray(pool);
-  }, [currentQuestion, blankGuesses]);
+  }, [currentQuestion, blankGuesses, activeDifficulty]);
   const topRowSets = sets;
 
   return (
@@ -619,7 +723,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
                         <div className={`text-[10px] font-black uppercase tracking-[0.25em] ${active ? 'text-orange-300' : 'text-slate-600'}`}>{set.translation}</div>
                         <div className="mt-1 font-black text-white group-hover:text-orange-300">{set.title}</div>
                         <div className="text-[11px] text-slate-400 leading-snug">{set.subtitle}</div>
-                        <div className="mt-2 text-[11px] text-slate-500">{set.verses.length} passages</div>
+                        <div className="mt-2 text-[11px] text-slate-500">{set.random ? 'Random draw' : `${set.verses.length} passages`}</div>
                       </button>
                     );
                   })}
@@ -649,13 +753,19 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
             <div className="text-center space-y-2 mb-8">
               <h2 className="text-4xl font-black text-white tracking-tight uppercase">{activeSet.title}</h2>
               <p className="text-orange-300 font-mono tracking-widest text-xs uppercase">{activeSet.subtitle}</p>
-              <p className="text-slate-500 text-sm mt-2">{activeSet.verses.length} passages loaded</p>
+              {activeSet.random ? (
+                <p className="text-slate-500 text-sm mt-2">Verses are drawn at random each round for fresh practice.</p>
+              ) : (
+                <p className="text-slate-500 text-sm mt-2">{activeSet.verses.length} passages loaded</p>
+              )}
 
-              <div className="flex justify-center">
-                <button onClick={() => setShowAllVerses(true)} className="inline-flex items-center gap-2 rounded-2xl border border-orange-500/30 bg-orange-950/30 px-5 py-3 text-sm font-black uppercase tracking-[0.2em] text-orange-200 transition-colors hover:bg-orange-900/40 hover:text-white">
-                  <BookOpen size={16} /> View All Loaded Verses
-                </button>
-              </div>
+              {!activeSet.random && (
+                <div className="flex justify-center">
+                  <button onClick={() => setShowAllVerses(true)} className="inline-flex items-center gap-2 rounded-2xl border border-orange-500/30 bg-orange-950/30 px-5 py-3 text-sm font-black uppercase tracking-[0.2em] text-orange-200 transition-colors hover:bg-orange-900/40 hover:text-white">
+                    <BookOpen size={16} /> View All Verses
+                  </button>
+                </div>
+              )}
             </div>
 
             {activeSet.isCustom && activeCustomCollection && (
@@ -673,10 +783,49 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
             <div className="rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
               <div className="rounded-2xl border border-white/5 bg-black/30 p-6 space-y-6">
                 <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => startGame('blanks')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><BookOpen className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
-                  <button onClick={() => startGame('builder')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-blue-500/40"><Layers className="text-blue-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
-                  <button onClick={() => startGame('tf')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
-                  <button onClick={() => startGame('reference')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
+                  <button onClick={() => selectMode('blanks')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><BookOpen className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
+                  <button onClick={() => selectMode('builder')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-blue-500/40"><Layers className="text-blue-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
+                  <button onClick={() => selectMode('tf')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
+                  <button onClick={() => selectMode('reference')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {appState === 'difficulty' && pendingMode && activeSet && (
+          <div className="w-full space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
+            <button onClick={() => setAppState('menu')} className="inline-flex items-center gap-2 mb-4 rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm font-black text-slate-200 transition-colors hover:bg-white/5 hover:border-orange-500/30">
+              <ChevronRight className="rotate-180 text-orange-300" size={16} /> Back to Modes
+            </button>
+
+            <div className="text-center space-y-2 mb-8">
+              <p className="text-orange-300 font-mono tracking-widest text-xs uppercase">{modeLabels[pendingMode]}</p>
+              <h2 className="text-4xl font-black text-white tracking-tight uppercase">Choose Your Level</h2>
+              <p className="text-slate-500 text-sm mt-2">Higher levels pull longer verses and hide more of the text.</p>
+            </div>
+
+            <div className="rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
+              <div className="rounded-2xl border border-white/5 bg-black/30 p-6">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  {(['easy', 'normal', 'sealed'] as Difficulty[]).map((level) => {
+                    const cfg = difficultyConfig[level];
+                    const ring =
+                      cfg.accent === 'green' ? 'hover:border-green-500/50 text-green-300'
+                      : cfg.accent === 'red' ? 'hover:border-red-500/50 text-red-300'
+                      : 'hover:border-orange-500/50 text-orange-300';
+                    return (
+                      <button
+                        key={level}
+                        onClick={() => startGame(pendingMode, level)}
+                        className={`group relative flex flex-col gap-2 rounded-2xl border border-white/10 bg-black/20 p-5 text-left transition-all hover:bg-white/5 ${ring}`}
+                      >
+                        <div className="text-[10px] font-black uppercase tracking-[0.35em] opacity-80">Level</div>
+                        <h3 className="text-2xl font-black text-white">{cfg.label}</h3>
+                        <p className="text-xs text-slate-400 leading-snug">{cfg.blurb}</p>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
