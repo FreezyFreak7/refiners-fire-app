@@ -135,7 +135,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
             type="button"
             onClick={() => setTab('libraries')}
             className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.2em] transition-colors ${
-              tab === 'libraries' ? 'bg-orange-500/15 text-orange-200 shadow-[0_0_0_1px_rgba(255,120,60,0.25)]' : 'text-slate-400 hover:bg-white/5'
+              tab === 'libraries' ? 'bg-orange-500/15 text-orange-200 shadow-[0_0_0_1px_rgba(255,120,60,0.25)]' : 'bg-black/40 text-slate-400 hover:bg-white/5'
             }`}
           >
             <BookOpen size={16} className={tab === 'libraries' ? 'text-orange-300' : 'text-slate-500'} />
@@ -145,7 +145,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
             type="button"
             onClick={() => setTab('live')}
             className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.2em] transition-colors ${
-              tab === 'live' ? 'bg-orange-500/15 text-orange-200 shadow-[0_0_0_1px_rgba(255,120,60,0.25)]' : 'text-slate-400 hover:bg-white/5'
+              tab === 'live' ? 'bg-orange-500/15 text-orange-200 shadow-[0_0_0_1px_rgba(255,120,60,0.25)]' : 'bg-black/40 text-slate-400 hover:bg-white/5'
             }`}
           >
             <Radio size={16} className={tab === 'live' ? 'text-orange-300' : 'text-slate-500'} />

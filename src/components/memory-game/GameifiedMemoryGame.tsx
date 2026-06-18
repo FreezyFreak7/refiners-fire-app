@@ -380,6 +380,9 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
   const [currentLevel, setCurrentLevel] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
+  const [correctCount, setCorrectCount] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const [missedCurrent, setMissedCurrent] = useState(false);
   const [feedback, setFeedback] = useState<'correct' | 'incorrect' | null>(null);
   const [blankGuesses, setBlankGuesses] = useState<string[]>([]);
   const [builderState, setBuilderState] = useState<BuilderState>({ target: [], scrambled: [], selected: [] });
@@ -555,6 +558,9 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     setCurrentLevel(0);
     setScore(0);
     setStreak(0);
+    setCorrectCount(0);
+    setBestStreak(0);
+    setMissedCurrent(false);
     setFeedback(null);
     setBlankGuesses([]);
     setAppState('playing');
@@ -570,6 +576,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     setCurrentLevel(nextIndex);
     setFeedback(null);
     setBlankGuesses([]);
+    setMissedCurrent(false);
     const nextQuestion = activeQuestions[nextIndex];
     if (nextQuestion?.kind === 'builder') initializeBuilder(nextQuestion);
   };
@@ -587,7 +594,10 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
       if (nextGuesses.length === currentQuestion.answers.length) {
         setFeedback('correct');
         setScore((prev) => prev + 10 + streak * 2);
-        setStreak((prev) => prev + 1);
+        const nextStreak = streak + 1;
+        setStreak(nextStreak);
+        setBestStreak((prev) => Math.max(prev, nextStreak));
+        if (!missedCurrent) setCorrectCount((prev) => prev + 1);
         window.setTimeout(advanceLevel, 1100);
       }
       return;
@@ -595,6 +605,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
     setFeedback('incorrect');
     setStreak(0);
+    setMissedCurrent(true);
     window.setTimeout(() => {
       setBlankGuesses([]);
       setFeedback(null);
@@ -606,12 +617,16 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     if (isCorrect) {
       setFeedback('correct');
       setScore((prev) => prev + 10 + streak * 2);
-      setStreak((prev) => prev + 1);
+      const nextStreak = streak + 1;
+      setStreak(nextStreak);
+      setBestStreak((prev) => Math.max(prev, nextStreak));
+      if (!missedCurrent) setCorrectCount((prev) => prev + 1);
       window.setTimeout(advanceLevel, 1100);
       return;
     }
     setFeedback('incorrect');
     setStreak(0);
+    setMissedCurrent(true);
     window.setTimeout(() => {
       if (activeMode === 'blanks') setFeedback(null);
       else advanceLevel();
@@ -784,7 +799,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
               <div className="rounded-2xl border border-white/5 bg-black/30 p-6 space-y-6">
                 <div className="grid grid-cols-2 gap-3">
                   <button onClick={() => selectMode('blanks')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><BookOpen className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
-                  <button onClick={() => selectMode('builder')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-blue-500/40"><Layers className="text-blue-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
+                  <button onClick={() => selectMode('builder')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><Layers className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
                   <button onClick={() => selectMode('tf')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
                   <button onClick={() => selectMode('reference')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
                 </div>
@@ -834,7 +849,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
         {appState === 'playing' && currentQuestion && (
           <div className="w-full flex flex-col items-center animate-in fade-in duration-500">
-            <div className="w-full max-w-xs h-1 bg-slate-800 rounded-full mb-8 overflow-hidden"><div className="h-full bg-orange-500 transition-all duration-500 ease-out" style={{ width: `${(currentLevel / Math.max(activeQuestions.length, 1)) * 100}%` }} /></div>
+            <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-orange-500 transition-all duration-500 ease-out" style={{ width: `${(currentLevel / Math.max(activeQuestions.length, 1)) * 100}%` }} /></div>
 
             {currentQuestion.kind === 'blanks' && (
               <div className="w-full max-w-2xl rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
@@ -847,35 +862,35 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
                     const guessedWord = blankIndex >= 0 ? blankGuesses[blankIndex] : undefined;
                     return `${guessedWord ?? word} `;
                   })}</div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{currentBlankOptions.map((opt, i) => <button key={`${opt}-${i}`} onClick={() => handleBlankChoice(opt)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-slate-700 border-slate-600 hover:border-orange-500'}`}>{opt}</button>)}</div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{currentBlankOptions.map((opt, i) => <button key={`${opt}-${i}`} onClick={() => handleBlankChoice(opt)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-orange-500'}`}>{opt}</button>)}</div>
                 </div>
               </div>
             )}
 
             {currentQuestion.kind === 'tf' && (
-              <div className="w-full max-w-lg bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl text-center">
+              <div className="w-full max-w-lg bg-neutral-900 p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
                 <div className="mb-6"><span className="text-green-400 font-mono text-xs uppercase tracking-widest bg-green-950/30 px-3 py-1 rounded-full border border-green-900/50">{currentQuestion.verse.ref}</span></div>
                 <h3 className="text-2xl font-serif text-white mb-8 min-h-[100px] flex items-center justify-center">“{currentQuestion.statement}”</h3>
                 {feedback && <div className={`mb-6 p-4 rounded-xl text-sm ${feedback === 'correct' ? 'bg-green-900/30 text-green-200' : 'bg-red-900/30 text-red-200'}`}>{feedback === 'correct' ? 'Correct!' : 'Incorrect!'} {feedback === 'incorrect' && currentQuestion.explanation}</div>}
                 <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => handleAnswer(currentQuestion.isTrue)} disabled={feedback !== null} className="p-6 rounded-2xl border-2 flex flex-col items-center gap-2 bg-slate-700 border-slate-600 hover:border-green-400"><CheckCircle className="w-8 h-8 text-green-400" /><span className="font-bold text-white">TRUE</span></button>
-                  <button onClick={() => handleAnswer(!currentQuestion.isTrue)} disabled={feedback !== null} className="p-6 rounded-2xl border-2 flex flex-col items-center gap-2 bg-slate-700 border-slate-600 hover:border-red-400"><XCircle className="w-8 h-8 text-red-400" /><span className="font-bold text-white">FALSE</span></button>
+                  <button onClick={() => handleAnswer(currentQuestion.isTrue)} disabled={feedback !== null} className="p-6 rounded-2xl border-2 flex flex-col items-center gap-2 bg-neutral-800 border-neutral-700 hover:border-green-400"><CheckCircle className="w-8 h-8 text-green-400" /><span className="font-bold text-white">TRUE</span></button>
+                  <button onClick={() => handleAnswer(!currentQuestion.isTrue)} disabled={feedback !== null} className="p-6 rounded-2xl border-2 flex flex-col items-center gap-2 bg-neutral-800 border-neutral-700 hover:border-red-400"><XCircle className="w-8 h-8 text-red-400" /><span className="font-bold text-white">FALSE</span></button>
                 </div>
               </div>
             )}
 
             {currentQuestion.kind === 'reference' && (
-              <div className="w-full max-w-2xl bg-slate-800 p-6 sm:p-8 rounded-3xl border border-slate-700 shadow-2xl text-center">
+              <div className="w-full max-w-2xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
                 <div className="mb-8"><span className="text-purple-400 font-mono text-xs uppercase tracking-widest bg-purple-950/30 px-3 py-1 rounded-full border border-purple-900/50">Identify Reference</span></div>
                 <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">“{currentQuestion.prompt}”</div>
-                <div className="grid grid-cols-2 gap-3">{currentQuestion.options.map((opt, i) => <button key={i} onClick={() => handleAnswer(opt === currentQuestion.correct)} disabled={feedback !== null} className="p-4 rounded-xl text-lg font-mono font-bold border-2 bg-slate-700 border-slate-600 hover:border-purple-500">{opt}</button>)}</div>
+                <div className="grid grid-cols-2 gap-3">{currentQuestion.options.map((opt, i) => <button key={i} onClick={() => handleAnswer(opt === currentQuestion.correct)} disabled={feedback !== null} className="p-4 rounded-xl text-lg font-mono font-bold border-2 bg-neutral-800 border-neutral-700 hover:border-purple-500">{opt}</button>)}</div>
               </div>
             )}
 
             {currentQuestion.kind === 'builder' && (
               <div className="w-full max-w-2xl flex flex-col items-center">
                 <div className="mb-4 text-sm font-black text-orange-300">{currentQuestion.verse.ref}</div>
-                <div className="w-full bg-slate-800 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-slate-600 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
+                <div className="w-full bg-neutral-900 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-neutral-700 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
                   {builderState.selected.map((chunk, i) => <div key={`${chunk}-${i}`} className="inline-flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/15 px-2 py-2 text-white shadow-lg"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-black text-orange-200 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderState.selected.length - 1} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-black text-orange-200 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>)}
                   {builderState.selected.length > 0 && !feedback && <button onClick={handleBuilderUndo} className="absolute bottom-4 right-4 text-xs text-slate-400 hover:text-white underline">Undo Last</button>}
                 </div>
@@ -884,20 +899,54 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
                   <button onClick={handleBuilderConfirm} disabled={feedback !== null || builderState.scrambled.length > 0 || builderState.selected.length === 0} className="rounded-2xl border border-orange-400/30 bg-orange-600 px-5 py-3 text-sm font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
                   {builderState.scrambled.length === 0 && !feedback && <span className="text-xs font-black uppercase tracking-[0.25em] text-orange-300/80">Ready when you are</span>}
                 </div>
-                <div className="flex flex-wrap justify-center gap-3">{builderState.scrambled.map((chunk, i) => <button key={`${chunk}-${i}`} onClick={() => handleBuilderClick(chunk)} disabled={feedback !== null} className="border border-orange-500/20 bg-slate-700 px-4 py-3 rounded-xl font-medium text-slate-200 shadow-md transition-all hover:border-orange-500 hover:bg-slate-600 active:scale-95">{chunk}</button>)}</div>
+                <div className="flex flex-wrap justify-center gap-3">{builderState.scrambled.map((chunk, i) => <button key={`${chunk}-${i}`} onClick={() => handleBuilderClick(chunk)} disabled={feedback !== null} className="border border-orange-500/20 bg-neutral-800 px-4 py-3 rounded-xl font-medium text-slate-200 shadow-md transition-all hover:border-orange-500 hover:bg-neutral-700 active:scale-95">{chunk}</button>)}</div>
               </div>
             )}
           </div>
         )}
 
-        {appState === 'finished' && (
-          <div className="max-w-md w-full bg-slate-800 p-8 rounded-2xl border border-white/10 text-center space-y-6 animate-in zoom-in duration-300">
-            <Award className="w-16 h-16 text-yellow-400 mx-auto" />
-            <h2 className="text-3xl font-bold">Run Complete!</h2>
-            <div className="py-4 bg-slate-900/50 rounded-xl"><div className="text-sm text-slate-400">Score</div><div className="text-4xl font-black text-white">{score}</div></div>
-            <button onClick={() => setAppState('menu')} className="w-full py-3 bg-white text-slate-900 font-bold rounded-xl hover:bg-slate-200">Continue</button>
-          </div>
-        )}
+        {appState === 'finished' && (() => {
+          const totalQuestions = activeQuestions.length;
+          const accuracy = totalQuestions ? Math.round((correctCount / totalQuestions) * 100) : 0;
+          return (
+            <div className="max-w-md w-full bg-neutral-900 p-8 rounded-2xl border border-white/10 text-center space-y-6 animate-in zoom-in duration-300">
+              <Award className="w-16 h-16 text-yellow-400 mx-auto" />
+              <div className="space-y-1">
+                <h2 className="text-3xl font-black text-white">Run Complete!</h2>
+                <p className="text-sm text-slate-400">You got <span className="font-black text-orange-300">{correctCount}</span> of <span className="font-black text-white">{totalQuestions}</span> verses correct.</p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-2xl border border-orange-500/20 bg-orange-950/20 p-4">
+                  <div className="text-[11px] font-black uppercase tracking-[0.25em] text-orange-300/80">Correct</div>
+                  <div className="mt-1 text-3xl font-black text-white">{correctCount}<span className="text-lg text-slate-500">/{totalQuestions}</span></div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                  <div className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Accuracy</div>
+                  <div className="mt-1 text-3xl font-black text-white">{accuracy}%</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-left">
+                    <div className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Points</div>
+                    <div className="text-3xl font-black text-white">{score}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Best Streak</div>
+                    <div className="text-3xl font-black text-white">{bestStreak}x</div>
+                  </div>
+                </div>
+                <div className="mt-3 border-t border-white/10 pt-3 text-xs text-slate-500">
+                  10 points per correct answer, plus a streak bonus (+2 for each answer in a row).
+                </div>
+              </div>
+
+              <button onClick={() => setAppState('menu')} className="w-full py-3 bg-white text-slate-900 font-bold rounded-xl hover:bg-slate-200">Continue</button>
+            </div>
+          );
+        })()}
       </div>
 
       {selectedVerse && (

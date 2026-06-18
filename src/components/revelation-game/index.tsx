@@ -61,6 +61,9 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const [currentLevel, setCurrentLevel] = useState(0);
   const [score, setScore] = useState(0);
   const [streak, setStreak] = useState(0);
+  const [correctCount, setCorrectCount] = useState(0);
+  const [bestStreak, setBestStreak] = useState(0);
+  const [missedCurrent, setMissedCurrent] = useState(false);
   const [feedback, setFeedback] = useState<'correct' | 'incorrect' | null>(null);
   const [activeQuestions, setActiveQuestions] = useState<any[]>([]);
   const [builderData, setBuilderData] = useState<{ target: any[]; scrambled: any[]; selected: any[] }>({
@@ -203,6 +206,9 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     setGameDifficulty(difficulty);
     setScore(0);
     setStreak(0);
+    setCorrectCount(0);
+    setBestStreak(0);
+    setMissedCurrent(false);
 
     setCurrentLevel(0);
     setAppState('playing');
@@ -234,14 +240,17 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const handleSinglePlayerAnswer = (isCorrect: any) => {
     if (feedback) return;
     if (isCorrect) {
-      setFeedback('correct'); setScore(score + 10 + (streak * 2)); setStreak(streak + 1);
+      const nextStreak = streak + 1;
+      setFeedback('correct'); setScore(score + 10 + (streak * 2)); setStreak(nextStreak);
+      setBestStreak((prev) => Math.max(prev, nextStreak));
+      if (!missedCurrent) setCorrectCount((prev) => prev + 1);
       setTimeout(() => {
-        if (currentLevel < activeQuestions.length - 1) { setCurrentLevel(currentLevel + 1); setFeedback(null); if(gameMode==='builder') initializeBuilderLevel(currentLevel+1, activeQuestions); }
+        if (currentLevel < activeQuestions.length - 1) { setCurrentLevel(currentLevel + 1); setFeedback(null); setMissedCurrent(false); if(gameMode==='builder') initializeBuilderLevel(currentLevel+1, activeQuestions); }
         else setAppState('finished');
       }, 1500);
     } else {
-      setFeedback('incorrect'); setStreak(0);
-      setTimeout(() => { if (gameMode !== 'blanks') { if (currentLevel < activeQuestions.length - 1) { setCurrentLevel(currentLevel + 1); setFeedback(null); } else setAppState('finished'); } else setFeedback(null); }, 2000);
+      setFeedback('incorrect'); setStreak(0); setMissedCurrent(true);
+      setTimeout(() => { if (gameMode !== 'blanks') { if (currentLevel < activeQuestions.length - 1) { setCurrentLevel(currentLevel + 1); setFeedback(null); setMissedCurrent(false); } else setAppState('finished'); } else setFeedback(null); }, 2000);
     }
   };
 
@@ -289,7 +298,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
         <div className="grid gap-4 md:grid-cols-2">
           <button onClick={createSession} disabled={!playerName} className="rounded-2xl border border-orange-400/30 bg-orange-600 p-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500 disabled:opacity-50">Host Game</button>
           <div className="space-y-3 rounded-2xl border border-white/10 bg-black/20 p-4">
-            <input type="text" placeholder="CODE" value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} className="w-full rounded-xl border border-orange-500/20 bg-slate-900 p-3 text-center uppercase tracking-[0.45em] text-white outline-none focus:border-orange-400" maxLength={4} />
+            <input type="text" placeholder="CODE" value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} className="w-full rounded-xl border border-orange-500/20 bg-neutral-950 p-3 text-center uppercase tracking-[0.45em] text-white outline-none focus:border-orange-400" maxLength={4} />
             <button onClick={joinSession} disabled={!playerName || roomCode.length !== 4} className="w-full rounded-xl border border-orange-500/30 bg-orange-950/50 p-3 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-900/40 disabled:opacity-50">Join Room</button>
           </div>
         </div>
@@ -306,7 +315,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
           <div className="rounded-[1.75rem] border border-white/5 bg-gradient-to-b from-orange-950/35 via-black/40 to-slate-950/80 p-8 space-y-6">
             <div className="bg-black/30 p-4 rounded-2xl inline-block border border-orange-500/30"><div className="text-xs text-orange-400 font-mono">ROOM CODE</div><div className="text-4xl font-black text-white tracking-widest">{roomCode}</div></div>
             <div className="space-y-2"><h3 className="text-slate-400 text-sm uppercase tracking-widest">Players Joined</h3><div className="flex flex-wrap gap-2 justify-center">{(Object.values(roomData.players || {}) as any[]).map((p: any, i: any) => (<span key={i} className="px-3 py-1 rounded-full border border-white/10 bg-black/20 text-white text-sm">{p.name}</span>))}</div></div>
-            {isHost ? (<div className="space-y-4"><div className="text-left rounded-2xl border border-white/10 bg-black/20 p-4"><label className="text-xs text-slate-400 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-orange-500/20 bg-slate-900 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div><button onClick={mpStartGame} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 py-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Start Game</button></div>) : (<div className="flex items-center justify-center gap-2 text-orange-300 animate-pulse"><Radio size={16} /> Waiting for Host...</div>)}
+            {isHost ? (<div className="space-y-4"><div className="text-left rounded-2xl border border-white/10 bg-black/20 p-4"><label className="text-xs text-slate-400 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-orange-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div><button onClick={mpStartGame} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 py-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Start Game</button></div>) : (<div className="flex items-center justify-center gap-2 text-orange-300 animate-pulse"><Radio size={16} /> Waiting for Host...</div>)}
           </div>
         </div>
       );
@@ -315,12 +324,12 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
       const currentQ = activeQuestions[roomData.questionIndex];
       if (!currentQ) return <div className="text-white">Loading Question...</div>;
       return (
-        <div className="w-full max-w-2xl bg-slate-800 p-6 sm:p-8 rounded-3xl border border-slate-700 shadow-2xl text-center">
+        <div className="w-full max-w-2xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
           <div className="flex justify-between items-center mb-6"><span className="text-orange-400 font-mono text-xs uppercase bg-orange-950/30 px-3 py-1 rounded-full border border-orange-900/50">Question {roomData.questionIndex + 1} / {activeQuestions.length}</span>{isHost && (<button onClick={mpNextQuestion} className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">Next <ArrowRight size={16} /></button>)}</div>
-          <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">{currentQ.textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold transition-all ${mpFeedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : mpFeedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-slate-700/50 border-orange-500/50 text-transparent min-w-[80px]'}`}>{mpFeedback ? currentQ.blank : '_____'}</span> {currentQ.textAfter}</div>
+          <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">{currentQ.textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold transition-all ${mpFeedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : mpFeedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-orange-500/50 text-transparent min-w-[80px]'}`}>{mpFeedback ? currentQ.blank : '_____'}</span> {currentQ.textAfter}</div>
           {mpFeedback && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${mpFeedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{mpFeedback === 'correct' ? 'Correct' : 'Wrong'}</div>}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">{(currentQ.options || []).map((opt: any, i: any) => (<button key={i} onClick={() => mpSubmitAnswer(opt)} disabled={mpFeedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${mpFeedback === 'correct' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white' : mpFeedback === 'incorrect' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-slate-700 border-slate-600 hover:border-orange-500'}`}>{opt}</button>))}</div>
-          <div className="border-t border-slate-700 pt-4"><h4 className="text-xs text-slate-500 uppercase tracking-widest mb-2">Live Scores</h4><div className="flex flex-wrap gap-4 justify-center">{(Object.entries(roomData.players || {}) as any[]).sort((a: any, b: any) => (b?.[1]?.score || 0) - (a?.[1]?.score || 0)).map(([pid, p]: any, i: any) => (<div key={pid} className={`flex items-center gap-2 text-sm ${pid === user.uid ? 'text-orange-300 font-bold' : 'text-slate-400'}`}><span>#{i+1} {p.name}</span><span className="bg-slate-900 px-2 py-0.5 rounded">{p.score}</span></div>))}</div></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">{(currentQ.options || []).map((opt: any, i: any) => (<button key={i} onClick={() => mpSubmitAnswer(opt)} disabled={mpFeedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${mpFeedback === 'correct' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white' : mpFeedback === 'incorrect' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-orange-500'}`}>{opt}</button>))}</div>
+          <div className="border-t border-neutral-700 pt-4"><h4 className="text-xs text-slate-500 uppercase tracking-widest mb-2">Live Scores</h4><div className="flex flex-wrap gap-4 justify-center">{(Object.entries(roomData.players || {}) as any[]).sort((a: any, b: any) => (b?.[1]?.score || 0) - (a?.[1]?.score || 0)).map(([pid, p]: any, i: any) => (<div key={pid} className={`flex items-center gap-2 text-sm ${pid === user.uid ? 'text-orange-300 font-bold' : 'text-slate-400'}`}><span>#{i+1} {p.name}</span><span className="bg-neutral-950 px-2 py-0.5 rounded">{p.score}</span></div>))}</div></div>
         </div>
       );
     }
@@ -489,45 +498,45 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
 
         {appState === 'playing' && (
            <div className="w-full flex flex-col items-center animate-in fade-in duration-500">
-              <div className="w-full max-w-xs h-1 bg-slate-800 rounded-full mb-8 overflow-hidden"><div className="h-full bg-orange-500 transition-all duration-500 ease-out" style={{ width: `${((currentLevel) / activeQuestions.length) * 100}%` }}></div></div>
+              <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-orange-500 transition-all duration-500 ease-out" style={{ width: `${((currentLevel) / activeQuestions.length) * 100}%` }}></div></div>
               {gameMode === 'blanks' && (
                 <div className="w-full max-w-2xl rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
                   <div className="rounded-2xl border border-white/5 bg-black/30 p-6 sm:p-8 relative overflow-hidden text-center">
                     <div className="mb-8"><span className="text-orange-400 font-mono text-xs uppercase tracking-widest bg-orange-950/30 px-3 py-1 rounded-full border border-orange-900/50">Rev {activeQuestions[currentLevel].verse}</span></div>
-                    <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">{activeQuestions[currentLevel].textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold ${feedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : feedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-slate-700/50 border-orange-500/50 text-transparent min-w-[80px]'}`}>{feedback === 'correct' || feedback === 'incorrect' ? activeQuestions[currentLevel].blank : '_____'}</span> {activeQuestions[currentLevel].textAfter}</div>
+                    <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">{activeQuestions[currentLevel].textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold ${feedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : feedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-orange-500/50 text-transparent min-w-[80px]'}`}>{feedback === 'correct' || feedback === 'incorrect' ? activeQuestions[currentLevel].blank : '_____'}</span> {activeQuestions[currentLevel].textAfter}</div>
                     {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: any, i: any) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].blank)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-slate-700 border-slate-600 hover:border-orange-500'}`}>{opt}</button>))}</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: any, i: any) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].blank)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-orange-500'}`}>{opt}</button>))}</div>
                   </div>
                 </div>
               )}
               {gameMode === 'tf' && (
-                <div className="w-full max-w-lg bg-slate-800 p-8 rounded-3xl border border-slate-700 shadow-2xl text-center">
+                <div className="w-full max-w-lg bg-neutral-900 p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
                   <div className="mb-6"><span className="text-green-400 font-mono text-xs uppercase tracking-widest bg-green-950/30 px-3 py-1 rounded-full border border-green-900/50">Rev {activeQuestions[currentLevel].verse}</span></div>
                   <h3 className="text-2xl font-serif text-white mb-8 min-h-[100px] flex items-center justify-center">"{activeQuestions[currentLevel].text}"</h3>
                   {feedback && (<div className={`mb-6 rounded-2xl border p-4 text-sm ${feedback === 'correct' ? 'border-green-500/30 bg-green-900/20 text-green-200' : 'border-red-500/30 bg-red-900/20 text-red-200'}`}><div className="mb-1 text-xs font-black uppercase tracking-[0.25em]">{feedback === 'correct' ? 'Correct' : 'Wrong'}</div>{feedback === 'incorrect' && activeQuestions[currentLevel].explanation}</div>)}
                   <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => handleSinglePlayerAnswer(true)} disabled={feedback !== null} className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 ${feedback === 'correct' && activeQuestions[currentLevel].isTrue ? 'bg-green-600 border-green-500' : 'bg-slate-700 border-slate-600 hover:border-green-400'}`}><CheckCircle className="w-8 h-8 text-green-400" /><span className="font-bold text-white">TRUE</span></button>
-                    <button onClick={() => handleSinglePlayerAnswer(false)} disabled={feedback !== null} className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 ${feedback === 'correct' && !activeQuestions[currentLevel].isTrue ? 'bg-red-600 border-red-500' : 'bg-slate-700 border-slate-600 hover:border-red-400'}`}><XCircle className="w-8 h-8 text-red-400" /><span className="font-bold text-white">FALSE</span></button>
+                    <button onClick={() => handleSinglePlayerAnswer(true)} disabled={feedback !== null} className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 ${feedback === 'correct' && activeQuestions[currentLevel].isTrue ? 'bg-green-600 border-green-500' : 'bg-neutral-800 border-neutral-700 hover:border-green-400'}`}><CheckCircle className="w-8 h-8 text-green-400" /><span className="font-bold text-white">TRUE</span></button>
+                    <button onClick={() => handleSinglePlayerAnswer(false)} disabled={feedback !== null} className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 ${feedback === 'correct' && !activeQuestions[currentLevel].isTrue ? 'bg-red-600 border-red-500' : 'bg-neutral-800 border-neutral-700 hover:border-red-400'}`}><XCircle className="w-8 h-8 text-red-400" /><span className="font-bold text-white">FALSE</span></button>
                   </div>
                 </div>
               )}
               {gameMode === 'guess_verse' && (
-                <div className="w-full max-w-2xl bg-slate-800 p-6 sm:p-8 rounded-3xl border border-slate-700 shadow-2xl relative overflow-hidden text-center">
+                <div className="w-full max-w-2xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl relative overflow-hidden text-center">
                   <div className="mb-8"><span className="text-purple-400 font-mono text-xs uppercase tracking-widest bg-purple-950/30 px-3 py-1 rounded-full border border-purple-900/50">Identify Reference</span></div>
                   <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">"{activeQuestions[currentLevel].text}"</div>
                   {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
-                  <div className="grid grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: string, i: number) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].correct)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-mono font-bold border-2 ${feedback === 'correct' && opt === activeQuestions[currentLevel].correct ? 'bg-green-600 border-green-500' : 'bg-slate-700 border-slate-600 hover:border-purple-500'}`}>Rev {opt}</button>))}</div>
+                  <div className="grid grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: string, i: number) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].correct)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-mono font-bold border-2 ${feedback === 'correct' && opt === activeQuestions[currentLevel].correct ? 'bg-green-600 border-green-500' : 'bg-neutral-800 border-neutral-700 hover:border-purple-500'}`}>Rev {opt}</button>))}</div>
                 </div>
               )}
               {gameMode === 'builder' && (
                 <div className="w-full max-w-2xl flex flex-col items-center">
-                  <div className="w-full bg-slate-800 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-slate-600 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
+                  <div className="w-full bg-neutral-900 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-neutral-700 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
                     {builderData.selected.map((chunk, i) => (<div key={i} className="inline-flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/15 px-2 py-2 text-white shadow-lg animate-in zoom-in duration-200"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-black text-orange-200 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderData.selected.length - 1} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-black text-orange-200 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>))}
                     {builderData.selected.length > 0 && !feedback && (<button onClick={handleBuilderUndo} className="absolute bottom-4 right-4 text-xs text-slate-400 hover:text-white underline">Undo Last</button>)}
                   </div>
                   {feedbackLabel && <div className={`mb-4 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
                   <div className="mb-3 text-xs font-black uppercase tracking-[0.3em] text-slate-500">Tap words below, then reorder the placed line</div>
-                  <div className="flex flex-wrap justify-center gap-3">{builderData.scrambled.map((chunk, i) => (<button key={i} onClick={() => handleBuilderClick(chunk)} disabled={feedback !== null} className="border border-orange-500/20 bg-slate-700 px-4 py-3 rounded-xl font-medium text-slate-200 shadow-md transition-all hover:border-orange-500 hover:bg-slate-600 active:scale-95">{chunk}</button>))}</div>
+                  <div className="flex flex-wrap justify-center gap-3">{builderData.scrambled.map((chunk, i) => (<button key={i} onClick={() => handleBuilderClick(chunk)} disabled={feedback !== null} className="border border-orange-500/20 bg-neutral-800 px-4 py-3 rounded-xl font-medium text-slate-200 shadow-md transition-all hover:border-orange-500 hover:bg-neutral-700 active:scale-95">{chunk}</button>))}</div>
                 </div>
               )}
            </div>
@@ -542,20 +551,32 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
               <div className="space-y-2">
                 <div className="text-xs font-mono uppercase tracking-[0.35em] text-orange-300">Run Complete</div>
                 <h2 className="text-4xl font-black uppercase tracking-tight text-white">Final Score</h2>
-                <p className="text-sm text-slate-400">You finished this Revelation run. Here is how you did.</p>
+                <p className="text-sm text-slate-400">You got <span className="font-black text-orange-300">{correctCount}</span> of <span className="font-black text-white">{activeQuestions.length}</span> questions correct.</p>
               </div>
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-2 gap-4">
                 <div className="rounded-2xl border border-orange-500/20 bg-orange-950/20 p-5">
-                  <div className="text-[11px] font-mono uppercase tracking-[0.3em] text-orange-300/80">Points Earned</div>
-                  <div className="mt-2 text-4xl font-black text-white">{score}</div>
+                  <div className="text-[11px] font-mono uppercase tracking-[0.3em] text-orange-300/80">Correct</div>
+                  <div className="mt-2 text-4xl font-black text-white">{correctCount}<span className="text-xl text-slate-500">/{activeQuestions.length}</span></div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-black/20 p-5">
-                  <div className="text-[11px] font-mono uppercase tracking-[0.3em] text-slate-400">Total Possible</div>
-                  <div className="mt-2 text-4xl font-black text-white">{totalPossibleScore}</div>
+                  <div className="text-[11px] font-mono uppercase tracking-[0.3em] text-slate-400">Accuracy</div>
+                  <div className="mt-2 text-4xl font-black text-white">{activeQuestions.length ? Math.round((correctCount / activeQuestions.length) * 100) : 0}%</div>
                 </div>
               </div>
-              <div className="rounded-2xl border border-white/10 bg-black/20 px-5 py-4 text-sm text-slate-300">
-                You earned <span className="font-black text-orange-300">{score}</span> out of <span className="font-black text-white">{totalPossibleScore}</span> possible points.
+              <div className="rounded-2xl border border-white/10 bg-black/20 px-5 py-4">
+                <div className="flex items-center justify-between">
+                  <div className="text-left">
+                    <div className="text-[11px] font-mono uppercase tracking-[0.3em] text-slate-400">Points</div>
+                    <div className="text-3xl font-black text-white">{score}<span className="text-lg text-slate-500">/{totalPossibleScore}</span></div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[11px] font-mono uppercase tracking-[0.3em] text-slate-400">Best Streak</div>
+                    <div className="text-3xl font-black text-white">{bestStreak}x</div>
+                  </div>
+                </div>
+                <div className="mt-3 border-t border-white/10 pt-3 text-xs text-slate-500">
+                  10 points per correct answer, plus a streak bonus (+2 for each answer in a row). The max for this run is {totalPossibleScore}.
+                </div>
               </div>
               <button onClick={() => setAppState('chapterSelect')} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 px-5 py-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Continue</button>
             </div>
