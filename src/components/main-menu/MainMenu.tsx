@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BookOpen, Flame, LogIn, LogOut, Radio, ScrollText, Settings, Sparkles, Trophy } from 'lucide-react';
+import { BookOpen, Coffee, Flame, LogIn, LogOut, Radio, ScrollText, Settings, Sparkles, Trophy } from 'lucide-react';
 import type { AuthTab } from './AuthModal';
 import BackgroundShell from './BackgroundShell';
 
@@ -272,7 +272,18 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
                 <div className="text-sm text-slate-300">Settings panel coming soon.</div>
               )}
               {panel === 'credits' && (
-                <div className="text-sm text-slate-300">Refiner&apos;s Fire. Built with React + Firebase.</div>
+                <div className="space-y-4 text-sm text-slate-300">
+                  <div>Refiner&apos;s Fire. Built with React + Firebase.</div>
+                  <a
+                    href="https://buymeacoffee.com/noahbyday"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-2 rounded-xl border border-orange-400/30 bg-orange-600 px-4 py-3 text-xs font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500"
+                  >
+                    <Coffee size={16} /> Buy Me a Coffee
+                  </a>
+                  <div className="text-xs text-slate-500">If you enjoy the app, your support keeps it going. Thank you!</div>
+                </div>
               )}
               <div className="mt-6 flex justify-end">
                 <button

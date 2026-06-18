@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Flame, Award, BookOpen, Layers, CheckCircle, XCircle, Home, Scroll, Mail, Megaphone, Droplet, Scale, Sun, Sword, Search, Users, Radio, Trophy, ArrowRight, ArrowLeft, Key, ChevronRight, AlertTriangle } from 'lucide-react';
 import { doc, setDoc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 
@@ -15,6 +15,18 @@ const revelationDifficultyConfig: Record<Difficulty, { label: string; blurb: str
   normal: { label: 'Normal', blurb: 'A balanced set of choices.', accent: 'orange', options: 4 },
   sealed: { label: 'Sealed', blurb: 'Every decoy is in play.', accent: 'red', options: 6 },
 };
+
+type SpeedKey = 'slow' | 'fast' | 'lightning';
+
+// Online-mode answer timer. Faster answers earn a bigger speed bonus on top of the base.
+const SPEED_SETTINGS: Record<SpeedKey, { label: string; blurb: string; seconds: number }> = {
+  slow: { label: 'Slow', blurb: '20s per question', seconds: 20 },
+  fast: { label: 'Fast', blurb: '12s per question', seconds: 12 },
+  lightning: { label: 'Lightning', blurb: '6s per question', seconds: 6 },
+};
+
+const MP_BASE_POINTS = 50;
+const MP_SPEED_BONUS = 50;
 
 const modeLabels: Record<string, string> = {
   blanks: 'Fill Blanks',
@@ -78,6 +90,12 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const [isHost, setIsHost] = useState(false);
   const [roomData, setRoomData] = useState<any>(null);
   const [mpFeedback, setMpFeedback] = useState<'correct' | 'incorrect' | null>(null);
+  const [mpTimeLeft, setMpTimeLeft] = useState(0);
+  const [mpLastGain, setMpLastGain] = useState(0);
+  const mpAnsweredRef = useRef(false);
+
+  const mpSpeedKey: SpeedKey = (roomData?.speed as SpeedKey) || 'fast';
+  const mpDurationMs = SPEED_SETTINGS[mpSpeedKey].seconds * 1000;
 
   const totalPossibleScore = activeQuestions.length
     ? activeQuestions.length * 10 + activeQuestions.length * (activeQuestions.length - 1)
@@ -97,9 +115,10 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', code);
     await setDoc(sessionRef, {
       hostId: user.uid,
-      status: 'waiting', 
-      chapterId: 'rev1', 
+      status: 'waiting',
+      chapterId: 'rev1',
       questionIndex: 0,
+      speed: 'fast',
       players: { [user.uid]: { name: playerName, score: 0, status: 'joined' } }
     });
     setAppState('multiplayer_room');
@@ -149,6 +168,29 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     }
   }, [roomData?.questionIndex, currentLevel, appState]);
 
+  // Per-question countdown for online play: resets on each new question, locks the
+  // round at zero, and drives the speed bonus via the remaining time.
+  useEffect(() => {
+    if (appState !== 'multiplayer_room' || roomData?.status !== 'playing') return;
+    mpAnsweredRef.current = false;
+    setMpFeedback(null);
+    setMpLastGain(0);
+    setMpTimeLeft(mpDurationMs);
+    const startedAt = Date.now();
+    const id = window.setInterval(() => {
+      const left = Math.max(0, mpDurationMs - (Date.now() - startedAt));
+      setMpTimeLeft(left);
+      if (left <= 0) {
+        window.clearInterval(id);
+        if (!mpAnsweredRef.current) {
+          mpAnsweredRef.current = true;
+          setMpFeedback('incorrect');
+        }
+      }
+    }, 100);
+    return () => window.clearInterval(id);
+  }, [roomData?.questionIndex, roomData?.status, appState, mpDurationMs]);
+
   const mpStartGame = async () => {
     if (!roomData) return;
     const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
@@ -157,15 +199,26 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   };
 
   const mpSubmitAnswer = async (answer: any) => {
-    if (!roomData || mpFeedback) return;
+    if (!roomData || mpFeedback || mpAnsweredRef.current) return;
+    mpAnsweredRef.current = true;
     const currentQ = activeQuestions[roomData.questionIndex];
     const isCorrect = answer === currentQ.blank;
     setMpFeedback(isCorrect ? 'correct' : 'incorrect');
-    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
 
+    // Faster answers keep more of the speed bonus; correct-but-slow still earns the base.
+    const fraction = mpDurationMs > 0 ? Math.max(0, Math.min(1, mpTimeLeft / mpDurationMs)) : 0;
+    const gained = isCorrect ? MP_BASE_POINTS + Math.round(MP_SPEED_BONUS * fraction) : 0;
+    setMpLastGain(gained);
+
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     const currentScore = roomData.players[user.uid]?.score || 0;
-    const updatedPlayer = { ...roomData.players[user.uid], score: currentScore + (isCorrect ? 100 : 0) };
+    const updatedPlayer = { ...roomData.players[user.uid], score: currentScore + gained };
     await updateDoc(sessionRef, { [`players.${user.uid}`]: updatedPlayer });
+  };
+
+  const mpSelectSpeed = async (speed: SpeedKey) => {
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    await updateDoc(sessionRef, { speed });
   };
 
   const mpNextQuestion = async () => {
@@ -315,7 +368,23 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
           <div className="rounded-[1.75rem] border border-white/5 bg-gradient-to-b from-orange-950/35 via-black/40 to-slate-950/80 p-8 space-y-6">
             <div className="bg-black/30 p-4 rounded-2xl inline-block border border-orange-500/30"><div className="text-xs text-orange-400 font-mono">ROOM CODE</div><div className="text-4xl font-black text-white tracking-widest">{roomCode}</div></div>
             <div className="space-y-2"><h3 className="text-slate-400 text-sm uppercase tracking-widest">Players Joined</h3><div className="flex flex-wrap gap-2 justify-center">{(Object.values(roomData.players || {}) as any[]).map((p: any, i: any) => (<span key={i} className="px-3 py-1 rounded-full border border-white/10 bg-black/20 text-white text-sm">{p.name}</span>))}</div></div>
-            {isHost ? (<div className="space-y-4"><div className="text-left rounded-2xl border border-white/10 bg-black/20 p-4"><label className="text-xs text-slate-400 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-orange-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div><button onClick={mpStartGame} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 py-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Start Game</button></div>) : (<div className="flex items-center justify-center gap-2 text-orange-300 animate-pulse"><Radio size={16} /> Waiting for Host...</div>)}
+            {isHost ? (<div className="space-y-4"><div className="text-left rounded-2xl border border-white/10 bg-black/20 p-4"><label className="text-xs text-slate-400 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-orange-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div>
+              <div className="text-left rounded-2xl border border-white/10 bg-black/20 p-4">
+                <label className="text-xs text-slate-400 mb-2 block uppercase tracking-[0.2em]">Answer Speed</label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(['slow', 'fast', 'lightning'] as SpeedKey[]).map((key) => {
+                    const active = (roomData.speed || 'fast') === key;
+                    return (
+                      <button key={key} type="button" onClick={() => mpSelectSpeed(key)} className={`flex flex-col items-center gap-1 rounded-xl border p-3 transition-all ${active ? 'border-orange-500/60 bg-orange-500/15 text-orange-200' : 'border-white/10 bg-black/20 text-slate-300 hover:border-orange-500/30'}`}>
+                        <span className="text-sm font-black uppercase tracking-[0.15em]">{SPEED_SETTINGS[key].label}</span>
+                        <span className="text-[10px] text-slate-500">{SPEED_SETTINGS[key].blurb}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="mt-2 text-[11px] text-slate-500">Answer faster to earn more points — up to {MP_BASE_POINTS + MP_SPEED_BONUS} per question.</div>
+              </div>
+              <button onClick={mpStartGame} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 py-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Start Game</button></div>) : (<div className="space-y-3"><div className="flex items-center justify-center gap-2 text-orange-300 animate-pulse"><Radio size={16} /> Waiting for Host...</div><div className="text-xs text-slate-500 uppercase tracking-[0.2em]">Speed: {SPEED_SETTINGS[(roomData.speed as SpeedKey) || 'fast'].label}</div></div>)}
           </div>
         </div>
       );
@@ -325,9 +394,25 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
       if (!currentQ) return <div className="text-white">Loading Question...</div>;
       return (
         <div className="w-full max-w-2xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
-          <div className="flex justify-between items-center mb-6"><span className="text-orange-400 font-mono text-xs uppercase bg-orange-950/30 px-3 py-1 rounded-full border border-orange-900/50">Question {roomData.questionIndex + 1} / {activeQuestions.length}</span>{isHost && (<button onClick={mpNextQuestion} className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">Next <ArrowRight size={16} /></button>)}</div>
+          <div className="flex justify-between items-center mb-4"><span className="text-orange-400 font-mono text-xs uppercase bg-orange-950/30 px-3 py-1 rounded-full border border-orange-900/50">Question {roomData.questionIndex + 1} / {activeQuestions.length}</span>{isHost && (<button onClick={mpNextQuestion} className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">Next <ArrowRight size={16} /></button>)}</div>
+          {(() => {
+            const pct = mpDurationMs > 0 ? Math.max(0, Math.min(100, (mpTimeLeft / mpDurationMs) * 100)) : 0;
+            const seconds = Math.ceil(mpTimeLeft / 1000);
+            const urgent = pct <= 30;
+            return (
+              <div className="mb-6">
+                <div className="mb-1 flex items-center justify-between text-[11px] font-black uppercase tracking-[0.25em]">
+                  <span className="text-slate-500">{SPEED_SETTINGS[mpSpeedKey].label}</span>
+                  <span className={mpFeedback ? 'text-slate-500' : urgent ? 'text-red-300' : 'text-orange-300'}>{mpFeedback ? 'Time up' : `${seconds}s`}</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-800">
+                  <div className={`h-full rounded-full transition-[width] duration-100 ease-linear ${urgent ? 'bg-red-500' : 'bg-orange-500'}`} style={{ width: `${mpFeedback ? 0 : pct}%` }} />
+                </div>
+              </div>
+            );
+          })()}
           <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">{currentQ.textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold transition-all ${mpFeedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : mpFeedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-orange-500/50 text-transparent min-w-[80px]'}`}>{mpFeedback ? currentQ.blank : '_____'}</span> {currentQ.textAfter}</div>
-          {mpFeedback && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${mpFeedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{mpFeedback === 'correct' ? 'Correct' : 'Wrong'}</div>}
+          {mpFeedback && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${mpFeedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{mpFeedback === 'correct' ? `Correct +${mpLastGain}` : 'Wrong'}</div>}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">{(currentQ.options || []).map((opt: any, i: any) => (<button key={i} onClick={() => mpSubmitAnswer(opt)} disabled={mpFeedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${mpFeedback === 'correct' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white' : mpFeedback === 'incorrect' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-orange-500'}`}>{opt}</button>))}</div>
           <div className="border-t border-neutral-700 pt-4"><h4 className="text-xs text-slate-500 uppercase tracking-widest mb-2">Live Scores</h4><div className="flex flex-wrap gap-4 justify-center">{(Object.entries(roomData.players || {}) as any[]).sort((a: any, b: any) => (b?.[1]?.score || 0) - (a?.[1]?.score || 0)).map(([pid, p]: any, i: any) => (<div key={pid} className={`flex items-center gap-2 text-sm ${pid === user.uid ? 'text-orange-300 font-bold' : 'text-slate-400'}`}><span>#{i+1} {p.name}</span><span className="bg-neutral-950 px-2 py-0.5 rounded">{p.score}</span></div>))}</div></div>
         </div>
