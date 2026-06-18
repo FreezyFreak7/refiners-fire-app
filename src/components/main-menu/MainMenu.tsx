@@ -275,7 +275,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
                 <div className="space-y-4 text-sm text-slate-300">
                   <div>Refiner&apos;s Fire. Built with React + Firebase.</div>
                   <a
-                    href="https://buymeacoffee.com/noahbyday"
+                    href="https://buymeacoffee.com/playrefinersfire"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 rounded-xl border border-orange-400/30 bg-orange-600 px-4 py-3 text-xs font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500"

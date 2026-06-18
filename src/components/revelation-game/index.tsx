@@ -27,6 +27,26 @@ const SPEED_SETTINGS: Record<SpeedKey, { label: string; blurb: string; seconds: 
 
 const MP_BASE_POINTS = 50;
 const MP_SPEED_BONUS = 50;
+const MP_MAX_VERSES = 50;
+
+// Total fill-blank questions available across every chapter — used to cap the verse slider.
+const MP_TOTAL_AVAILABLE = Object.keys(gameData).reduce((sum, key) => sum + ((gameData[key]?.blanks || []).length), 0);
+
+// Build the shared question list for an online round. The selected chapter's verses come
+// first, then verses from other chapters fill up to `count`. Options are pre-shuffled here so
+// every player renders the identical set in the identical order (the host writes this to the
+// session and all clients read it back).
+const buildMpQuestionPool = (chapterId: string, count: number) => {
+  const primary = gameData[chapterId]?.blanks || [];
+  const others = Object.keys(gameData)
+    .filter((key) => key !== chapterId)
+    .flatMap((key) => gameData[key]?.blanks || []);
+  const target = Math.max(1, Math.min(count, MP_TOTAL_AVAILABLE));
+  const combined = [...primary, ...shuffleArray(others)].slice(0, target);
+  return shuffleArray(
+    combined.map((q: any) => ({ ...q, options: shuffleArray([q.blank, ...((q.options || []).filter((opt: any) => opt !== q.blank))]) }))
+  );
+};
 
 const modeLabels: Record<string, string> = {
   blanks: 'Fill Blanks',
@@ -92,6 +112,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const [mpFeedback, setMpFeedback] = useState<'correct' | 'incorrect' | null>(null);
   const [mpTimeLeft, setMpTimeLeft] = useState(0);
   const [mpLastGain, setMpLastGain] = useState(0);
+  const [mpVerseCount, setMpVerseCount] = useState(10);
   const mpAnsweredRef = useRef(false);
 
   const mpSpeedKey: SpeedKey = (roomData?.speed as SpeedKey) || 'fast';
@@ -119,6 +140,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
       chapterId: 'rev1',
       questionIndex: 0,
       speed: 'fast',
+      verseCount: 10,
       players: { [user.uid]: { name: playerName, score: 0, status: 'joined' } }
     });
     setAppState('multiplayer_room');
@@ -150,14 +172,15 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   }, [appState, roomCode, appId]);
 
   useEffect(() => {
-    if (appState === 'multiplayer_room' && roomData?.status === 'playing' && roomData?.chapterId) {
-      const rawQ = gameData[roomData.chapterId]?.blanks || [];
-      if (activeQuestions.length === 0 || activeQuestions[0]?.verse?.split(':')[0] !== rawQ[0]?.verse?.split(':')[0]) {
-        const processed = rawQ.map((q: any) => ({ ...q, options: shuffleArray([q.blank, ...((q.options || []).filter((opt: any) => opt !== q.blank))]) }));
-        setActiveQuestions(processed);
-      }
+    if (appState !== 'multiplayer_room') return;
+    // The host writes the shared question list to the session; every client renders that exact
+    // set (same order, same options) so questionIndex lines up for everyone.
+    if (roomData?.status === 'playing' && Array.isArray(roomData?.questions)) {
+      if (activeQuestions.length === 0) setActiveQuestions(roomData.questions);
+    } else if (roomData?.status === 'waiting') {
+      if (activeQuestions.length !== 0) setActiveQuestions([]);
     }
-  }, [roomData?.chapterId, roomData?.status, appState]);
+  }, [roomData?.status, roomData?.questions, appState, activeQuestions.length]);
 
   useEffect(() => {
     if (appState === 'multiplayer_room' && roomData?.questionIndex !== undefined) {
@@ -194,8 +217,27 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const mpStartGame = async () => {
     if (!roomData) return;
     const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
-    const questions = gameData[roomData.chapterId]?.blanks || [];
-    await updateDoc(sessionRef, { status: 'playing', questionIndex: 0, totalQuestions: questions.length });
+    const questions = buildMpQuestionPool(roomData.chapterId || 'rev1', roomData.verseCount || mpVerseCount);
+    await updateDoc(sessionRef, { status: 'playing', questionIndex: 0, totalQuestions: questions.length, questions });
+  };
+
+  const mpSelectVerseCount = async (count: number) => {
+    const clamped = Math.max(1, Math.min(MP_MAX_VERSES, count));
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    await updateDoc(sessionRef, { verseCount: clamped });
+  };
+
+  // End-of-game return: send the whole group back to the waiting room (same room code),
+  // reset scores and progress so the host can set up and start another round.
+  const mpReturnToRoom = async () => {
+    if (!roomData) return;
+    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    const resetPlayers: Record<string, any> = {};
+    Object.entries(roomData.players || {}).forEach(([pid, p]: any) => {
+      resetPlayers[pid] = { ...p, score: 0 };
+    });
+    setActiveQuestions([]);
+    await updateDoc(sessionRef, { status: 'waiting', questionIndex: 0, questions: [], players: resetPlayers });
   };
 
   const mpSubmitAnswer = async (answer: any) => {
@@ -384,7 +426,25 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 </div>
                 <div className="mt-2 text-[11px] text-slate-500">Answer faster to earn more points — up to {MP_BASE_POINTS + MP_SPEED_BONUS} per question.</div>
               </div>
-              <button onClick={mpStartGame} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 py-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Start Game</button></div>) : (<div className="space-y-3"><div className="flex items-center justify-center gap-2 text-orange-300 animate-pulse"><Radio size={16} /> Waiting for Host...</div><div className="text-xs text-slate-500 uppercase tracking-[0.2em]">Speed: {SPEED_SETTINGS[(roomData.speed as SpeedKey) || 'fast'].label}</div></div>)}
+              <div className="text-left rounded-2xl border border-white/10 bg-black/20 p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="text-xs text-slate-400 uppercase tracking-[0.2em]">Verses to Play</label>
+                  <span className="rounded-lg border border-orange-500/30 bg-orange-950/30 px-3 py-1 text-sm font-black text-orange-200">{mpVerseCount}</span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={MP_MAX_VERSES}
+                  value={mpVerseCount}
+                  onChange={(e) => setMpVerseCount(Number(e.target.value))}
+                  onMouseUp={() => mpSelectVerseCount(mpVerseCount)}
+                  onTouchEnd={() => mpSelectVerseCount(mpVerseCount)}
+                  onKeyUp={() => mpSelectVerseCount(mpVerseCount)}
+                  className="w-full accent-orange-500"
+                />
+                <div className="mt-1 flex justify-between text-[10px] text-slate-600"><span>1</span><span>{MP_MAX_VERSES}</span></div>
+              </div>
+              <button onClick={mpStartGame} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 py-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Start Game</button></div>) : (<div className="space-y-3"><div className="flex items-center justify-center gap-2 text-orange-300 animate-pulse"><Radio size={16} /> Waiting for Host...</div><div className="text-xs text-slate-500 uppercase tracking-[0.2em]">Speed: {SPEED_SETTINGS[(roomData.speed as SpeedKey) || 'fast'].label} · {roomData.verseCount || 10} verses</div></div>)}
           </div>
         </div>
       );
@@ -425,7 +485,8 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
           <div className="rounded-[1.5rem] border border-white/5 bg-gradient-to-b from-orange-950/40 via-black/40 to-slate-950/80 p-8 space-y-6">
             <Trophy className="w-16 h-16 text-yellow-400 mx-auto animate-bounce" /><h2 className="text-3xl font-black text-white">Final Standings</h2>
             <div className="space-y-2">{sortedPlayers.map(([pid, p]: any, i: any) => (<div key={pid} className={`flex justify-between items-center p-3 rounded-xl ${i===0 ? 'bg-yellow-500/20 border border-yellow-500/50' : 'border border-white/10 bg-black/20'}`}><div className="flex items-center gap-3"><span className="font-mono font-bold text-slate-400">#{i+1}</span><span className="font-bold text-white">{p.name}</span></div><span className="font-mono text-white">{p.score}</span></div>))}</div>
-            <button onClick={() => { if (lobbyReturnToMainMenu) onBack(); else setAppState('actSelect'); }} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 py-3 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Return to Lobby</button>
+            <button onClick={mpReturnToRoom} className="w-full rounded-2xl border border-orange-400/30 bg-orange-600 py-3 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500">Back to Room</button>
+            <button onClick={() => { if (lobbyReturnToMainMenu) onBack(); else setAppState('actSelect'); }} className="text-sm text-slate-500 transition-colors hover:text-white">Leave group</button>
           </div>
         </div>
       );
