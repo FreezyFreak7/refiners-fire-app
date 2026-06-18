@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import RevelationGame from './components/revelation-game/index';
 import MemoryGame from './components/memory-game/GameifiedMemoryGame';
 import MainMenu from './components/main-menu/MainMenu';
@@ -52,7 +53,12 @@ const App: React.FC = () => {
   const isMember = !!user && !user.isAnonymous;
 
   if (showLaunch) {
-    return <LaunchAnimation onComplete={() => setShowLaunch(false)} />;
+    return (
+      <>
+        <LaunchAnimation onComplete={() => setShowLaunch(false)} />
+        <SpeedInsights />
+      </>
+    );
   }
 
   if (!mode) {
@@ -75,6 +81,8 @@ const App: React.FC = () => {
           onLogin={handleLogin}
           onRegister={handleRegister}
         />
+
+        <SpeedInsights />
       </>
     );
   }
@@ -97,6 +105,7 @@ const App: React.FC = () => {
           initialAppState={mode === 'live_group' ? 'lobby' : 'actSelect'}
         />
       )}
+      <SpeedInsights />
     </BackgroundShell>
   );
 };
