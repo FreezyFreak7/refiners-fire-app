@@ -1,12 +1,19 @@
 import React, { useMemo, useState } from 'react';
-import { BookOpen, Coffee, Flame, LogIn, LogOut, Radio, ScrollText, Settings, Sparkles, Trophy } from 'lucide-react';
+import { BookOpen, ChevronRight, Coffee, Flame, LogIn, LogOut, Radio, ScrollText, Settings, Sparkles, Swords, Trophy, User, UserRound } from 'lucide-react';
 import type { AuthTab } from './AuthModal';
 import BackgroundShell from './BackgroundShell';
+import { avatarSrc } from '../../data/avatars';
+import type { UserProfile } from '../../utils/userProfile';
 
 interface MainMenuProps {
   isMember: boolean;
+  profile: UserProfile | null;
+  streak: number;
   onSelectMode: (mode: 'old_testament' | 'gospels' | 'new_testament' | 'revelation' | 'alpha_omega' | 'live_group') => void;
   onOpenAuth: (tab?: AuthTab) => void;
+  onOpenProfile: () => void;
+  onOpenDaily: () => void;
+  onOpenFurnace: () => void;
   onLogout: () => Promise<void>;
 }
 
@@ -21,7 +28,7 @@ type MenuItemId =
   | 'settings'
   | 'credits';
 
-const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth, onLogout }) => {
+const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelectMode, onOpenAuth, onOpenProfile, onOpenDaily, onOpenFurnace, onLogout }) => {
   const [activeId, setActiveId] = useState<MenuItemId>('start_old_testament');
   const [panel, setPanel] = useState<null | 'how' | 'settings' | 'credits'>(null);
   const [tab, setTab] = useState<'libraries' | 'live'>('libraries');
@@ -87,169 +94,268 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
   return (
     <BackgroundShell>
       <div className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-6 py-10" tabIndex={0} onKeyDown={onKeyDown}>
-        <div className="flex items-start justify-end">
-          {!isMember ? (
-            <button
-              type="button"
-              onClick={() => onOpenAuth('login')}
-              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-xs font-black text-slate-200 hover:bg-white/5"
-            >
-              <LogIn size={16} className="text-orange-300" />
-              LOGIN
-            </button>
+        <div className="flex items-center justify-end gap-2">
+          {isMember ? (
+            <>
+              {/* Signed-in identity lives here on the home screen: avatar + username, opening the
+                  profile to edit. */}
+              <button
+                type="button"
+                onClick={onOpenProfile}
+                className="group inline-flex items-center gap-2 border border-transparent py-1 pl-1 pr-3 transition-colors hover:border-iron-700"
+              >
+                {(() => {
+                  const src = avatarSrc(profile?.avatarId);
+                  return src ? (
+                    <img
+                      src={src}
+                      alt=""
+                      className="h-8 w-8 rounded-full border border-gold-500/40 object-cover"
+                    />
+                  ) : (
+                    <span className="flex h-8 w-8 items-center justify-center rounded-full border border-iron-700 bg-soot-800 text-ash-600">
+                      <UserRound size={16} />
+                    </span>
+                  );
+                })()}
+                <span className="font-display text-sm font-semibold uppercase tracking-forge text-ash-300 transition-colors group-hover:text-gold-400">
+                  {profile?.username?.trim() || 'Set username'}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onLogout()}
+                aria-label="Log out"
+                className="inline-flex items-center gap-2 border border-iron-700 px-3 py-2 font-display text-xs font-semibold uppercase tracking-forge leading-none text-ash-300 transition-colors hover:border-ember-500 hover:text-ember-400"
+              >
+                <LogOut size={15} />
+              </button>
+            </>
           ) : (
-            <button
-              type="button"
-              onClick={() => onLogout()}
-              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-xs font-black text-slate-200 hover:bg-white/5"
-            >
-              <LogOut size={16} className="text-orange-300" />
-              LOGOUT
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={onOpenProfile}
+                className="inline-flex items-center gap-2 border border-transparent px-4 py-2 font-display text-xs font-semibold uppercase tracking-forge leading-none text-ash-500 transition-colors hover:border-iron-700 hover:text-ember-400"
+              >
+                <User size={15} />
+                Profile
+              </button>
+              <button
+                type="button"
+                onClick={() => onOpenAuth('login')}
+                className="inline-flex items-center gap-2 border border-iron-700 px-4 py-2 font-display text-xs font-semibold uppercase tracking-forge leading-none text-ash-300 transition-colors hover:border-ember-500 hover:text-ember-400"
+              >
+                <LogIn size={15} />
+                Login
+              </button>
+            </>
           )}
         </div>
 
         <div className="mt-10 flex flex-1 flex-col items-center justify-center">
           <div className="mb-10 w-full text-center">
-            <div className="mb-6 flex justify-center">
-              <div className="inline-flex items-center justify-center rounded-3xl border border-orange-500/30 bg-black/30 p-5 shadow-2xl backdrop-blur-xl">
-                <img
-                  src="https://images.squarespace-cdn.com/content/63ceec1f6db7d32cd45a7e8f/37b4821c-9b93-4e5c-beb3-943f7f6d02c9/output-onlinegiftools+%282%29.gif?content-type=image%2Fgif"
-                  alt="Fire"
-                  className="h-16 w-16 object-contain"
-                />
-              </div>
+            <div className="mb-5 flex justify-center">
+              <img
+                src="https://images.squarespace-cdn.com/content/63ceec1f6db7d32cd45a7e8f/37b4821c-9b93-4e5c-beb3-943f7f6d02c9/output-onlinegiftools+%282%29.gif?content-type=image%2Fgif"
+                alt=""
+                className="h-14 w-14 object-contain drop-shadow-[0_0_24px_rgba(255,107,31,0.45)]"
+              />
             </div>
 
-            <div className="mx-auto w-full max-w-xl">
-              <div className="text-center text-5xl sm:text-6xl font-black uppercase tracking-tight bg-gradient-to-r from-orange-300 via-orange-400 to-red-500 bg-clip-text text-transparent">
-                Refiner&apos;s Fire
-              </div>
-            </div>
+            {/* Solid ink, no gradient fill. The heat comes from the background, not the type. */}
+            <h1 className="struck text-6xl sm:text-7xl">
+              Refiner&apos;s Fire
+            </h1>
 
-            <div className="mt-4 text-xs font-black uppercase tracking-[0.35em] text-slate-400">A DRAMATIC BIBLE CHALLENGE, FORGED IN REVELATION.</div>
+            <div className="mx-auto mt-5 w-40 rule-fade" />
+
+            <p className="mt-5 text-sm text-ash-500">
+              A dramatic Bible challenge, forged in Revelation.
+            </p>
           </div>
 
-        <div className="mb-4 grid w-full max-w-xl grid-cols-2 gap-2 rounded-2xl border border-white/10 bg-black/30 p-1.5">
+        {/* Challenges — competitive modes with world leaderboards, given top billing. */}
+        <div className="mb-5 grid w-full max-w-xl gap-2 sm:grid-cols-2">
+          <button
+            type="button"
+            onClick={onOpenDaily}
+            className="group flex items-center gap-3 border border-forge-500/50 bg-gradient-to-br from-forge-700/25 to-transparent px-4 py-4 text-left transition-colors hover:border-forge-400"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-forge-400/50 bg-soot-900 text-forge-400">
+              <Swords size={18} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-display text-base font-semibold uppercase tracking-forge text-ash-200">
+                Daily Challenge
+              </span>
+              {streak > 0 ? (
+                <span className="inline-flex items-center gap-1 text-xs font-bold text-forge-300">
+                  <Flame size={12} /> {streak}-day streak · keep it alive
+                </span>
+              ) : (
+                <span className="block text-xs text-ash-500">Same set for all. New every day.</span>
+              )}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={onOpenFurnace}
+            className="group flex items-center gap-3 border border-forge-500/50 bg-gradient-to-br from-forge-700/25 to-transparent px-4 py-4 text-left transition-colors hover:border-forge-400"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-forge-400/50 bg-soot-900 text-forge-400">
+              <Flame size={18} />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-display text-base font-semibold uppercase tracking-forge text-ash-200">
+                The Furnace
+              </span>
+              <span className="block text-xs text-ash-500">Survival. How far can you endure?</span>
+            </span>
+          </button>
+        </div>
+
+        {/* Tabs as struck plates on a rail, not pills in a tray. The active one is lit from below. */}
+        <div className="mb-5 grid w-full max-w-xl grid-cols-2 border-b border-iron-800">
           <button
             type="button"
             onClick={() => setTab('libraries')}
-            className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.2em] transition-colors ${
-              tab === 'libraries' ? 'bg-orange-500/15 text-orange-200 shadow-[0_0_0_1px_rgba(255,120,60,0.25)]' : 'bg-black/40 text-slate-400 hover:bg-white/5'
+            className={`group inline-flex items-center justify-center gap-2 border-b-2 px-4 py-3 font-display text-sm font-semibold uppercase tracking-forge transition-colors ${
+              tab === 'libraries'
+                ? 'border-ember-500 text-ash-200'
+                : 'border-transparent text-ash-600 hover:text-ash-400'
             }`}
           >
-            <BookOpen size={16} className={tab === 'libraries' ? 'text-orange-300' : 'text-slate-500'} />
+            <BookOpen size={15} className={tab === 'libraries' ? 'text-ember-400' : ''} />
             Libraries
           </button>
           <button
             type="button"
             onClick={() => setTab('live')}
-            className={`inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-xs font-black uppercase tracking-[0.2em] transition-colors ${
-              tab === 'live' ? 'bg-orange-500/15 text-orange-200 shadow-[0_0_0_1px_rgba(255,120,60,0.25)]' : 'bg-black/40 text-slate-400 hover:bg-white/5'
+            className={`group inline-flex items-center justify-center gap-2 border-b-2 px-4 py-3 font-display text-sm font-semibold uppercase tracking-forge transition-colors ${
+              tab === 'live'
+                ? 'border-ember-500 text-ash-200'
+                : 'border-transparent text-ash-600 hover:text-ash-400'
             }`}
           >
-            <Radio size={16} className={tab === 'live' ? 'text-orange-300' : 'text-slate-500'} />
+            <Radio size={15} className={tab === 'live' ? 'text-ember-400' : ''} />
             Live Group Study
           </button>
         </div>
 
-        {tab === 'libraries' ? (
-        <div className="w-full max-w-xl rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
-          <div className="rounded-2xl border border-white/5 bg-black/30 p-6">
-            <div className="mb-3 text-xs font-bold uppercase tracking-[0.35em] text-slate-500">SELECT LIBRARY</div>
-            <div className="space-y-2">
-              {items.map((item) => {
-                const active = item.id === activeId;
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onMouseEnter={() => setActiveId(item.id)}
-                    onFocus={() => setActiveId(item.id)}
-                    onClick={() => runAction(item.id)}
-                    className={`group flex w-full items-center justify-between rounded-2xl border px-4 py-4 text-left transition-all ${
-                      active
-                        ? 'border-orange-500/60 bg-orange-500/10 shadow-[0_0_0_1px_rgba(255,120,60,0.15)]'
-                        : 'border-white/5 bg-black/10 hover:border-orange-500/30 hover:bg-white/5'
+        {/* Both panels share one grid cell, so the row is always as tall as the taller panel
+            and nothing below the tabs moves when you switch between them. */}
+        <div className="grid w-full max-w-xl">
+        <div
+          className={`[grid-area:1/1] plate w-full self-start p-6 ${
+            tab === 'libraries' ? '' : 'invisible'
+          }`}
+        >
+          <div className="stamp mb-4">Select library</div>
+
+          {/* Rows divided by hairlines rather than each floating in its own card. */}
+          <div className="divide-y divide-iron-800/70 border-y border-iron-800/70">
+            {items.map((item) => {
+              const active = item.id === activeId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onMouseEnter={() => setActiveId(item.id)}
+                  onFocus={() => setActiveId(item.id)}
+                  onClick={() => runAction(item.id)}
+                  className={`group relative flex w-full items-center justify-between py-4 pl-4 pr-3 text-left transition-colors ${
+                    active ? 'bg-ember-700/10' : 'hover:bg-iron-800/40'
+                  }`}
+                >
+                  {/* The heat mark: a hot bar struck down the leading edge of the live row. */}
+                  <span
+                    className={`absolute inset-y-0 left-0 w-[3px] transition-colors ${
+                      active ? 'bg-ember-500' : 'bg-transparent'
                     }`}
-                  >
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex h-9 w-9 items-center justify-center rounded-xl border transition-colors ${
-                          active ? 'border-orange-500/40 bg-orange-500/10 text-orange-300' : 'border-white/10 bg-black/20 text-slate-300'
+                  />
+
+                  <div className="flex items-center gap-3">
+                    <span className={active ? 'text-ember-400' : 'text-ash-600'}>{item.icon}</span>
+                    <span>
+                      <span
+                        className={`block font-display text-lg font-semibold uppercase tracking-forge ${
+                          active ? 'text-ash-200' : 'text-ash-400'
                         }`}
                       >
-                        {item.icon}
-                      </div>
-                      <div>
-                        <div className="font-black text-white">{item.label}</div>
-                        {item.id === 'start_old_testament' && <div className="text-xs text-slate-400">Law, wisdom, prophets, and foundational passages</div>}
-                        {item.id === 'start_gospels' && <div className="text-xs text-slate-400">Teachings, parables, prayer, and discipleship</div>}
-                        {item.id === 'start_new_testament' && <div className="text-xs text-slate-400">Acts, letters, endurance, and church life</div>}
-                        {item.id === 'start_revelation' && <div className="text-xs text-slate-400">Acts, chapters, and Revelation study runs</div>}
-                        {item.id === 'start_alpha_omega' && <div className="text-xs text-slate-400">A mixed run from Genesis to Revelation</div>}
-                        {item.id === 'start_live_group' && <div className="text-xs text-slate-400">Host a room or join friends in real time</div>}
-                      </div>
-                    </div>
+                        {item.label}
+                      </span>
+                      {item.id === 'start_old_testament' && <span className="block text-xs text-ash-600">Law, wisdom, prophets, and foundational passages</span>}
+                      {item.id === 'start_gospels' && <span className="block text-xs text-ash-600">Teachings, parables, prayer, and discipleship</span>}
+                      {item.id === 'start_new_testament' && <span className="block text-xs text-ash-600">Acts, letters, endurance, and church life</span>}
+                      {item.id === 'start_revelation' && <span className="block text-xs text-ash-600">Acts, chapters, and Revelation study runs</span>}
+                      {item.id === 'start_alpha_omega' && <span className="block text-xs text-ash-600">A mixed run from Genesis to Revelation</span>}
+                      {item.id === 'start_live_group' && <span className="block text-xs text-ash-600">Host a room or join friends in real time</span>}
+                    </span>
+                  </div>
 
-                    <div
-                      className={`text-xs font-black uppercase tracking-[0.25em] transition-colors ${
-                        active ? 'text-orange-300' : 'text-slate-600 group-hover:text-slate-400'
-                      }`}
-                    >
-                      ENTER
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                  <ChevronRight
+                    size={18}
+                    className={`shrink-0 transition-all ${
+                      active ? 'translate-x-0 text-ember-400' : '-translate-x-1 text-iron-600'
+                    }`}
+                  />
+                </button>
+              );
+            })}
           </div>
         </div>
-        ) : (
-        <div className="w-full max-w-xl rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
-          <div className="rounded-2xl border border-white/5 bg-black/30 p-8 text-center">
-            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border border-orange-400/30 bg-orange-500/15 text-orange-300 shadow-[0_20px_60px_-20px_rgba(249,115,22,0.55)]">
-              <Radio size={30} />
-            </div>
-            <h2 className="text-2xl font-black text-white">Live Group Study</h2>
-            <p className="mx-auto mt-2 max-w-sm text-sm text-slate-400">
-              Host a room or join friends with a room code and race through verse challenges together in real time.
-            </p>
-            <button
-              type="button"
-              onClick={() => onSelectMode('live_group')}
-              className="mt-6 inline-flex items-center justify-center gap-2 rounded-2xl border border-orange-400/30 bg-orange-600 px-6 py-3 text-sm font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500"
-            >
-              <Radio size={16} /> Enter Live Study
-            </button>
-          </div>
-        </div>
-        )}
+        <div
+          className={`[grid-area:1/1] plate w-full self-start p-10 text-center ${
+            tab === 'live' ? '' : 'invisible'
+          }`}
+        >
+          <Radio size={34} className="mx-auto mb-5 text-ember-400 drop-shadow-[0_0_18px_rgba(255,107,31,0.5)]" />
 
-        <div className="mt-8 flex w-full max-w-xl flex-col gap-2 sm:flex-row sm:items-center sm:justify-center">
+          <h2 className="struck text-4xl">Live Group Study</h2>
+
+          <div className="mx-auto mt-4 w-24 rule-fade" />
+
+          <p className="mx-auto mt-4 max-w-sm text-sm text-ash-500">
+            Host a room or join friends with a room code and race through verse challenges together in real time.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => onSelectMode('live_group')}
+            className="btn-primary mt-7 inline-flex items-center justify-center gap-2 px-7 py-3 font-display text-sm font-semibold uppercase tracking-forge"
+          >
+            <Radio size={15} /> Enter Live Study
+          </button>
+        </div>
+        </div>
+
+        {/* Secondary actions read as engraved text on the plate, not as three more buttons. */}
+        <div className="mt-8 flex w-full max-w-xl items-center justify-center gap-6">
           <button
             type="button"
             onClick={() => setPanel('how')}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs font-black text-slate-200 hover:bg-white/5"
+            className="inline-flex items-center gap-2 font-display text-xs font-semibold uppercase tracking-forge text-ash-600 transition-colors hover:text-ember-400"
           >
-            <Trophy size={16} className="text-orange-300" />
-            HOW TO PLAY
+            <Trophy size={14} /> How to play
           </button>
+          <span className="h-3 w-px bg-iron-700" />
           <button
             type="button"
             onClick={() => setPanel('settings')}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs font-black text-slate-200 hover:bg-white/5"
+            className="inline-flex items-center gap-2 font-display text-xs font-semibold uppercase tracking-forge text-ash-600 transition-colors hover:text-ember-400"
           >
-            <Settings size={16} className="text-orange-300" />
-            SETTINGS
+            <Settings size={14} /> Settings
           </button>
+          <span className="h-3 w-px bg-iron-700" />
           <button
             type="button"
             onClick={() => setPanel('credits')}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs font-black text-slate-200 hover:bg-white/5"
+            className="inline-flex items-center gap-2 font-display text-xs font-semibold uppercase tracking-forge text-ash-600 transition-colors hover:text-ember-400"
           >
-            <Flame size={16} className="text-orange-300" />
-            CREDITS
+            <Flame size={14} /> Credits
           </button>
         </div>
 
@@ -257,41 +363,56 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, onSelectMode, onOpenAuth,
 
         {panel && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <button type="button" className="absolute inset-0 bg-black/80" onClick={() => setPanel(null)} />
-            <div className="relative w-full max-w-lg rounded-3xl border border-white/10 bg-slate-950/80 p-6 backdrop-blur-xl">
-              <div className="mb-3 text-xs font-black uppercase tracking-[0.35em] text-slate-500">{panel}</div>
+            <button type="button" className="absolute inset-0 bg-soot-950/90" onClick={() => setPanel(null)} />
+            <div className="plate relative w-full max-w-lg p-7">
+              <div className="stamp mb-1">{panel}</div>
+              <div className="mb-5 rule-fade" />
+
               {panel === 'how' && (
-                <div className="space-y-3 text-sm text-slate-200">
-                  <div className="text-slate-300">
-                    Choose a mode, answer questions, and keep your streak alive. Member accounts unlock hidden content.
-                  </div>
-                  <div className="text-slate-400">Tip: Use the keyboard for a classic menu feel.</div>
+                <div className="space-y-3 text-sm text-ash-400">
+                  <p>
+                    Choose a library, answer what comes, and keep your streak alive. Member accounts
+                    unlock saved passages, playlists, and your own quizzes.
+                  </p>
+                  <p className="text-ash-600">Tip: the arrow keys and Enter work throughout the menu.</p>
                 </div>
               )}
+
               {panel === 'settings' && (
-                <div className="text-sm text-slate-300">Settings panel coming soon.</div>
+                <div className="text-sm text-ash-500">Settings panel coming soon.</div>
               )}
+
               {panel === 'credits' && (
-                <div className="space-y-4 text-sm text-slate-300">
-                  <div>Refiner&apos;s Fire. Built with React + Firebase.</div>
+                <div className="space-y-5 text-sm text-ash-400">
+                  <p>Refiner&apos;s Fire. Built with React and Firebase.</p>
                   <a
                     href="https://buymeacoffee.com/playrefinersfire"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 rounded-xl border border-orange-400/30 bg-orange-600 px-4 py-3 text-xs font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500"
+                    className="btn-primary inline-flex items-center gap-2 px-5 py-3 font-display text-xs font-semibold uppercase tracking-forge"
                   >
-                    <Coffee size={16} /> Buy Me a Coffee
+                    <Coffee size={15} /> Buy me a coffee
                   </a>
-                  <div className="text-xs text-slate-500">If you enjoy the app, your support keeps it going. Thank you!</div>
+                  <p className="text-xs text-ash-600">
+                    If you enjoy the app, your support keeps it going. Thank you.
+                  </p>
+
+                  {/* Required attribution for NIV text. */}
+                  <div className="border-t border-iron-800 pt-4 text-xs leading-relaxed text-ash-600">
+                    Scripture quotations taken from the Holy Bible, New International Version®,
+                    NIV®. Copyright © 1973, 1978, 1984 by Biblica, Inc.™ Used by permission. All
+                    rights reserved worldwide.
+                  </div>
                 </div>
               )}
-              <div className="mt-6 flex justify-end">
+
+              <div className="mt-7 flex justify-end">
                 <button
                   type="button"
                   onClick={() => setPanel(null)}
-                  className="rounded-xl border border-white/10 bg-black/30 px-4 py-2 text-xs font-black text-slate-200 hover:bg-white/5"
+                  className="border border-iron-700 px-4 py-2 font-display text-xs font-semibold uppercase tracking-forge text-ash-400 transition-colors hover:border-ember-500 hover:text-ember-400"
                 >
-                  CLOSE
+                  Close
                 </button>
               </div>
             </div>

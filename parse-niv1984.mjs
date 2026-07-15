@@ -5,7 +5,11 @@ const projectRoot = process.cwd()
 
 const INPUT_PATH = path.join(projectRoot, 'data', 'Bible-1984-NIV.txt')
 const OUTPUT_VERSES_PATH = path.join(projectRoot, 'data', 'niv1984.parsed.json')
-const OUTPUT_CANONICAL_VERSES_PATH = path.join(projectRoot, 'data', 'niv1984.canonical.json')
+
+// The app fetches this file at runtime from public/ rather than bundling it, so the parser
+// writes straight to where it is served from. Writing it into data/ instead would recreate the
+// duplicate copy this used to produce.
+const OUTPUT_CANONICAL_VERSES_PATH = path.join(projectRoot, 'public', 'bible', 'niv1984.json')
 const OUTPUT_BOOK_TOKENS_PATH = path.join(projectRoot, 'data', 'niv1984.bookTokens.json')
 const OUTPUT_UNMAPPED_TOKENS_PATH = path.join(projectRoot, 'data', 'niv1984.unmappedBookTokens.json')
 

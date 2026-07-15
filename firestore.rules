@@ -1,0 +1,78 @@
+rules_version = '2';
+
+// This file mirrors what is deployed in the Firebase console (Firestore Database -> Rules).
+// Firestore denies anything not explicitly allowed here, so there is no catch-all deny block.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Per-board leaderboard score ceiling (see the boards rule below).
+    function boardCap(boardId) {
+      return boardId.matches('daily-.*') ? 2000 : 100000;
+    }
+
+    // Live game rooms are shared between players in a session, so any signed-in player
+    // (including anonymous ones, which is how everyone starts) can read and write them.
+    match /artifacts/{appId}/public/data/sessions/{code} {
+      allow read, write: if request.auth != null;
+    }
+
+    // World leaderboards for the challenge modes (daily, furnace, and future ones), one board per
+    // boardId. Public to read; a member may only write their own score doc, and only to raise it
+    // (keep-best). Anonymous users can view but not post.
+    //
+    // Score cap blocks the crudest console forgery ("set score to 999999") at the database level
+    // with no false positives. It does NOT stop a plausible forged score — that needs server-side
+    // re-scoring (Cloud Functions). Caps are per-board:
+    //   - daily-*  : max is QUESTIONS_PER_DAY * (BASE + SPEED_BONUS) = 10 * 200 = 2000
+    //                (see maxDailyScore() in utils/dailyChallenge.ts).
+    //   - other    : a generous sanity ceiling for open-ended modes like survival.
+    match /artifacts/{appId}/public/data/boards/{boardId}/scores/{userId} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+                    && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                    && request.auth.uid == userId
+                    && request.resource.data.uid == userId
+                    && request.resource.data.score is int
+                    && request.resource.data.score >= 0
+                    && request.resource.data.score <= boardCap(boardId);
+
+      allow update: if request.auth != null
+                    && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                    && request.auth.uid == userId
+                    && request.resource.data.uid == userId
+                    && request.resource.data.score is int
+                    && request.resource.data.score >= resource.data.score
+                    && request.resource.data.score <= boardCap(boardId);
+    }
+
+    // Private profile data: saved passages, playlists, quizzes, and the profile doc
+    // (username + avatar). Only the owner can touch their own subtree. Anonymous users are
+    // excluded because profiles require a real account.
+    match /artifacts/{appId}/users/{userId}/{document=**} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId
+                         && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // Username reservations enforce one-name-per-person. The doc id is the lowercased username,
+    // so at most one account can hold a given name. Uniqueness is enforced by Firestore itself:
+    // `create` only succeeds when the doc does not already exist, and the rule below requires the
+    // claimant to write their own uid. A name can only be released or re-pointed by its owner.
+    match /usernames/{key} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+                    && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                    && request.resource.data.uid == request.auth.uid;
+
+      allow update: if request.auth != null
+                    && resource.data.uid == request.auth.uid
+                    && request.resource.data.uid == request.auth.uid;
+
+      allow delete: if request.auth != null
+                    && resource.data.uid == request.auth.uid;
+    }
+  }
+}

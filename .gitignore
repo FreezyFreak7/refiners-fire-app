@@ -12,6 +12,9 @@ dist
 dist-ssr
 *.local
 
+# Intermediate output of parse-niv1984.mjs. The app reads public/bible/niv1984.json instead.
+data/niv1984.parsed.json
+
 # Claude Code local tooling
 .claude
 

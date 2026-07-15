@@ -6,13 +6,14 @@ import {
   BookOpen,
   CheckCircle,
   ChevronRight,
+  Flame,
   Home,
   Layers,
   Plus,
   Search,
   XCircle,
 } from 'lucide-react';
-import niv1984Canonical from '../../../data/niv1984.canonical.json';
+import { loadBible, type BibleData } from '../../utils/bible';
 
 interface MemoryGameProps {
   onBack: () => void;
@@ -31,7 +32,6 @@ type CustomCollection = {
   verses: VerseRecord[];
 };
 
-type BibleData = Record<string, Record<string, Record<string, string>>>;
 type VerseLookupResult = { ref: string; text: string };
 type GameMode = 'blanks' | 'builder' | 'tf' | 'reference';
 type AppState = 'library' | 'menu' | 'difficulty' | 'playing' | 'finished';
@@ -74,14 +74,29 @@ type BuilderState = {
   selected: string[];
 };
 
-const bibleData = niv1984Canonical as BibleData;
 const createCollectionId = () => `collection_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
+type BookSlices = {
+  all: string[];
+  oldTestament: string[];
+  newTestament: string[];
+  gospels: string[];
+};
+
 // Canonical book order so each library can draw at random from the right slice of Scripture.
-const ALL_BOOKS = Object.keys(bibleData);
-const OLD_TESTAMENT_BOOKS = ALL_BOOKS.slice(0, 39);
-const NEW_TESTAMENT_BOOKS = ALL_BOOKS.slice(39);
-const GOSPEL_BOOKS = ['Matthew', 'Mark', 'Luke', 'John'].filter((book) => book in bibleData);
+// Derived once the Bible has loaded, rather than at import time — the text is fetched on demand
+// instead of being compiled into the bundle.
+const sliceBooks = (data: BibleData): BookSlices => {
+  const all = Object.keys(data);
+  return {
+    all,
+    oldTestament: all.slice(0, 39),
+    newTestament: all.slice(39),
+    gospels: ['Matthew', 'Mark', 'Luke', 'John'].filter((book) => book in data),
+  };
+};
+
+const EMPTY_SLICES: BookSlices = { all: [], oldTestament: [], newTestament: [], gospels: [] };
 
 type Difficulty = 'easy' | 'normal' | 'sealed';
 
@@ -144,7 +159,7 @@ const countWords = (text: string) => text.replace(/\s+/g, ' ').trim().split(' ')
 
 // Draw `count` random single verses from the given books, preferring verses inside the
 // requested word-length window so the difficulty actually changes how hard the round feels.
-const sampleRandomVerses = (books: string[], count: number, minWords: number, maxWords: number): VerseRecord[] => {
+const sampleRandomVerses = (bibleData: BibleData, books: string[], count: number, minWords: number, maxWords: number): VerseRecord[] => {
   const results: VerseRecord[] = [];
   const seen = new Set<string>();
   const pool = books.filter((book) => bibleData[book]);
@@ -205,7 +220,7 @@ const parseVerseRefParts = (ref: string) => {
   return { book, chapter, verseStart: Number(verseStart), verseEnd: Number(verseEnd ?? verseStart) };
 };
 
-const lookupVerseText = (ref: string): VerseLookupResult | null => {
+const lookupVerseText = (bibleData: BibleData, ref: string): VerseLookupResult | null => {
   const parts = parseVerseRefParts(ref);
   if (!parts) return null;
   const chapterData = bibleData[parts.book]?.[String(parts.chapter)];
@@ -219,9 +234,9 @@ const lookupVerseText = (ref: string): VerseLookupResult | null => {
   return { ref, text: verses.join(' ') };
 };
 
-const buildVerseRecords = (refs: string[]): VerseRecord[] =>
+const buildVerseRecords = (bibleData: BibleData, refs: string[]): VerseRecord[] =>
   refs
-    .map((ref) => lookupVerseText(ref))
+    .map((ref) => lookupVerseText(bibleData, ref))
     .filter((verse): verse is VerseLookupResult => verse !== null)
     .map((verse) => ({ ref: verse.ref, text: verse.text }));
 
@@ -387,7 +402,32 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
   const [blankGuesses, setBlankGuesses] = useState<string[]>([]);
   const [builderState, setBuilderState] = useState<BuilderState>({ target: [], scrambled: [], selected: [] });
 
+  // The Bible is fetched once from public/ rather than bundled, so it arrives asynchronously.
+  const [bibleData, setBibleData] = useState<BibleData | null>(null);
+  const [bibleError, setBibleError] = useState<string | null>(null);
+
   useEffect(() => {
+    let cancelled = false;
+
+    loadBible()
+      .then((data) => {
+        if (!cancelled) setBibleData(data);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setBibleError(err.message);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const books = useMemo(() => (bibleData ? sliceBooks(bibleData) : EMPTY_SLICES), [bibleData]);
+
+  useEffect(() => {
+    // Stored collections keep only refs, so verse text is rehydrated from the Bible once it lands.
+    if (!bibleData) return;
+
     try {
       const raw = localStorage.getItem('rf_memory_collections');
       if (!raw) return;
@@ -400,7 +440,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
           ? item.verses
               .map((verse: any) => {
                 const ref = typeof verse?.ref === 'string' ? verse.ref : '';
-                const lookup = ref ? lookupVerseText(ref) : null;
+                const lookup = ref ? lookupVerseText(bibleData, ref) : null;
                 const text = typeof verse?.text === 'string' && verse.text.trim() ? verse.text.trim() : lookup?.text ?? '';
                 return ref && text ? { ref, text } : null;
               })
@@ -412,7 +452,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     } catch {
       // no-op
     }
-  }, []);
+  }, [bibleData]);
 
   useEffect(() => {
     try {
@@ -441,7 +481,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
       verses: [] as VerseRecord[],
       isCustom: false,
       random: true,
-      books: OLD_TESTAMENT_BOOKS,
+      books: books.oldTestament,
     },
     {
       id: 'gospels',
@@ -451,7 +491,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
       verses: [] as VerseRecord[],
       isCustom: false,
       random: true,
-      books: GOSPEL_BOOKS,
+      books: books.gospels,
     },
     {
       id: 'new_testament',
@@ -461,7 +501,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
       verses: [] as VerseRecord[],
       isCustom: false,
       random: true,
-      books: NEW_TESTAMENT_BOOKS,
+      books: books.newTestament,
     },
     {
       id: 'alpha_omega',
@@ -471,9 +511,9 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
       verses: [] as VerseRecord[],
       isCustom: false,
       random: true,
-      books: ALL_BOOKS,
+      books: books.all,
     },
-  ], [customCollections, isMember]);
+  ], [customCollections, isMember, books]);
 
   const activeSet = sets.find((set) => set.id === activeSetId) ?? sets[0];
   const activeCustomCollection = customCollections.find((collection) => collection.id === activeCustomCollectionId) ?? null;
@@ -500,7 +540,11 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     }
     const ref = normalizeVerseRef(customRef);
     if (!ref) return;
-    const lookup = lookupVerseText(ref);
+    if (!bibleData) {
+      setCustomError('The Bible text is still loading. Try again in a moment.');
+      return;
+    }
+    const lookup = lookupVerseText(bibleData, ref);
     if (!lookup) {
       setCustomError('Verse not found in the NIV 1984 data.');
       return;
@@ -535,7 +579,9 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
     // Random libraries pull a fresh draw from Scripture each round; custom collections use their saved verses.
     const versePool = activeSet.random
-      ? sampleRandomVerses(activeSet.books, 10, cfg.minWords, cfg.maxWords)
+      ? bibleData
+        ? sampleRandomVerses(bibleData, activeSet.books, 10, cfg.minWords, cfg.maxWords)
+        : []
       : shuffleArray(activeSet.verses).slice(0, Math.min(activeSet.verses.length, 12));
 
     if (!versePool.length) return;
@@ -684,27 +730,56 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
   }, [currentQuestion, blankGuesses, activeDifficulty]);
   const topRowSets = sets;
 
+  // Every library and every game mode needs the Bible text, so hold the screen until it lands
+  // rather than letting Start silently do nothing.
+  if (!bibleData) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6 text-ash-200">
+        <button
+          onClick={onBack}
+          className="absolute left-4 top-4 rounded-full border border-iron-800 bg-soot-900/70 p-2 hover:bg-iron-800/40"
+          title="Back to Main Menu"
+        >
+          <ArrowLeft size={16} />
+        </button>
+
+        {bibleError ? (
+          <div className="max-w-sm rounded-2xl border border-red-500/30 bg-red-950/30 p-4 text-center text-sm text-red-200">
+            {bibleError}
+          </div>
+        ) : (
+          <>
+            <Flame size={28} className="animate-pulse text-gold-400" />
+            <div className="text-xs font-black uppercase tracking-[0.35em] text-ash-500">
+              Loading Scripture…
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen text-slate-100 font-sans flex flex-col items-center selection:bg-orange-500 selection:text-white">
-      <div className="fixed top-0 left-0 w-full p-4 flex justify-between items-center bg-black/30 backdrop-blur-xl border-b border-white/5 z-50">
+    <div className="min-h-screen text-ash-200 font-sans flex flex-col items-center selection:bg-gold-500 selection:text-soot-950">
+      <div className="fixed top-0 left-0 w-full p-4 flex justify-between items-center bg-soot-900/70 border-b border-iron-800/60 z-50">
         <div className="flex items-center gap-3">
-          <button onClick={onBack} className="p-2 bg-black/30 border border-white/10 rounded-full hover:bg-white/5 transition-colors" title="Back to Main Menu">
+          <button onClick={onBack} className="p-2 bg-soot-900/70 border border-iron-800 rounded-full hover:bg-iron-800/40 transition-colors" title="Back to Main Menu">
             <ArrowLeft size={16} />
           </button>
           <div className="flex items-center gap-2 cursor-pointer" onClick={onBack}>
             <img src="https://images.squarespace-cdn.com/content/63ceec1f6db7d32cd45a7e8f/37b4821c-9b93-4e5c-beb3-943f7f6d02c9/output-onlinegiftools+%282%29.gif?content-type=image%2Fgif" alt="Fire" className="h-5 w-5 object-contain" />
-            <span className="font-black hidden sm:inline text-slate-200 tracking-wide">Refiner's Fire</span>
+            <span className="font-black hidden sm:inline text-ash-200 tracking-wide">Refiner's Fire</span>
           </div>
         </div>
         <div className="flex items-center gap-4">
           {appState === 'playing' && (
             <div className="flex gap-4 text-sm font-mono">
-              <div className="flex items-center gap-1 text-orange-400"><Award size={14} /> {score}</div>
-              <div className="flex items-center gap-1 text-slate-400"><AlertTriangle size={14} /> {streak}x</div>
+              <div className="flex items-center gap-1 text-gold-400"><Award size={14} /> {score}</div>
+              <div className="flex items-center gap-1 text-ash-500"><AlertTriangle size={14} /> {streak}x</div>
             </div>
           )}
           {appState !== 'menu' && (
-            <button onClick={onBack} className="p-2 bg-black/30 border border-white/10 rounded-full hover:bg-white/5 transition-colors" title="Back to Main Menu">
+            <button onClick={onBack} className="p-2 bg-soot-900/70 border border-iron-800 rounded-full hover:bg-iron-800/40 transition-colors" title="Back to Main Menu">
               <Home size={16} />
             </button>
           )}
@@ -716,11 +791,11 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
           <div className="w-full space-y-6">
             <div className="text-center space-y-2">
               <h1 className="text-4xl font-bold text-white">Memory Game</h1>
-              <div className="text-xs font-black uppercase tracking-[0.35em] text-slate-500">FULLY GAMEIFIED MEMORY TRAINING</div>
+              <div className="text-xs font-black uppercase tracking-[0.35em] text-ash-600">FULLY GAMEIFIED MEMORY TRAINING</div>
             </div>
 
-            <div className="w-full rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
-              <div className="rounded-2xl border border-white/5 bg-black/30 p-6 space-y-6">
+            <div className="w-full rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
+              <div className="rounded-2xl border border-iron-800/60 bg-soot-900/70 p-6 space-y-6">
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 items-stretch">
                   {topRowSets.map((set) => {
                     const active = set.id === activeSetId;
@@ -733,23 +808,23 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
                           if (set.isCustom) setActiveCustomCollectionId(set.id);
                           setAppState('menu');
                         }}
-                        className={`group rounded-2xl border p-3 text-left transition-all ${active ? 'border-orange-500/60 bg-orange-500/10' : 'border-white/5 bg-black/10 hover:border-orange-500/30 hover:bg-white/5'}`}
+                        className={`group rounded-2xl border p-3 text-left transition-all ${active ? 'border-gold-500/60 bg-gold-500/10' : 'border-iron-800/60 bg-soot-900/30 hover:border-gold-500/30 hover:bg-iron-800/40'}`}
                       >
-                        <div className={`text-[10px] font-black uppercase tracking-[0.25em] ${active ? 'text-orange-300' : 'text-slate-600'}`}>{set.translation}</div>
-                        <div className="mt-1 font-black text-white group-hover:text-orange-300">{set.title}</div>
-                        <div className="text-[11px] text-slate-400 leading-snug">{set.subtitle}</div>
-                        <div className="mt-2 text-[11px] text-slate-500">{set.random ? 'Random draw' : `${set.verses.length} passages`}</div>
+                        <div className={`text-[10px] font-black uppercase tracking-[0.25em] ${active ? 'text-gold-400' : 'text-ash-600'}`}>{set.translation}</div>
+                        <div className="mt-1 font-black text-white group-hover:text-gold-400">{set.title}</div>
+                        <div className="text-[11px] text-ash-500 leading-snug">{set.subtitle}</div>
+                        <div className="mt-2 text-[11px] text-ash-600">{set.random ? 'Random draw' : `${set.verses.length} passages`}</div>
                       </button>
                     );
                   })}
                 </div>
 
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <div className="text-xs font-black uppercase tracking-[0.35em] text-slate-500">CREATE COLLECTION</div>
+                <div className="rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
+                  <div className="text-xs font-black uppercase tracking-[0.35em] text-ash-600">CREATE COLLECTION</div>
                   <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
-                    <input value={newCollectionName} onChange={(e) => setNewCollectionName(e.target.value)} placeholder="Collection name" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30" />
-                    <button type="button" onClick={createNamedCollection} className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs font-black text-slate-200 hover:bg-white/5">
-                      <Plus size={16} className="text-orange-300" /> SAVE COLLECTION
+                    <input value={newCollectionName} onChange={(e) => setNewCollectionName(e.target.value)} placeholder="Collection name" className="w-full rounded-xl border border-iron-800 bg-soot-900/70 px-4 py-3 text-sm text-ash-200 placeholder:text-ash-600 focus:outline-none focus:ring-2 focus:ring-gold-500/30" />
+                    <button type="button" onClick={createNamedCollection} className="inline-flex items-center justify-center gap-2 rounded-xl border border-iron-800 bg-soot-900/50 px-4 py-3 text-xs font-black text-ash-200 hover:bg-iron-800/40">
+                      <Plus size={16} className="text-gold-400" /> SAVE COLLECTION
                     </button>
                   </div>
                   {customError && <div className="mt-3 rounded-xl border border-red-500/30 bg-red-950/30 px-4 py-3 text-sm text-red-200">{customError}</div>}
@@ -761,22 +836,22 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
         {appState === 'menu' && activeSet && (
           <div className="w-full space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
-            <button onClick={onBack} className="inline-flex items-center gap-2 mb-4 rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm font-black text-slate-200 transition-colors hover:bg-white/5 hover:border-orange-500/30">
-              <ChevronRight className="rotate-180 text-orange-300" size={16} /> Back to Main Menu
+            <button onClick={onBack} className="inline-flex items-center gap-2 mb-4 rounded-full border border-iron-800 bg-soot-900/50 px-4 py-2 text-sm font-black text-ash-200 transition-colors hover:bg-iron-800/40 hover:border-gold-500/30">
+              <ChevronRight className="rotate-180 text-gold-400" size={16} /> Back to Main Menu
             </button>
 
             <div className="text-center space-y-2 mb-8">
               <h2 className="text-4xl font-black text-white tracking-tight uppercase">{activeSet.title}</h2>
-              <p className="text-orange-300 font-mono tracking-widest text-xs uppercase">{activeSet.subtitle}</p>
+              <p className="text-gold-400 font-mono tracking-widest text-xs uppercase">{activeSet.subtitle}</p>
               {activeSet.random ? (
-                <p className="text-slate-500 text-sm mt-2">Verses are drawn at random each round for fresh practice.</p>
+                <p className="text-ash-600 text-sm mt-2">Verses are drawn at random each round for fresh practice.</p>
               ) : (
-                <p className="text-slate-500 text-sm mt-2">{activeSet.verses.length} passages loaded</p>
+                <p className="text-ash-600 text-sm mt-2">{activeSet.verses.length} passages loaded</p>
               )}
 
               {!activeSet.random && (
                 <div className="flex justify-center">
-                  <button onClick={() => setShowAllVerses(true)} className="inline-flex items-center gap-2 rounded-2xl border border-orange-500/30 bg-orange-950/30 px-5 py-3 text-sm font-black uppercase tracking-[0.2em] text-orange-200 transition-colors hover:bg-orange-900/40 hover:text-white">
+                  <button onClick={() => setShowAllVerses(true)} className="inline-flex items-center gap-2 rounded-2xl border border-gold-500/30 bg-gold-700/15 px-5 py-3 text-sm font-black uppercase tracking-[0.2em] text-gold-300 transition-colors hover:bg-gold-700/25 hover:text-white">
                     <BookOpen size={16} /> View All Verses
                   </button>
                 </div>
@@ -784,24 +859,24 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
             </div>
 
             {activeSet.isCustom && activeCustomCollection && (
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                <div className="text-xs font-black uppercase tracking-[0.35em] text-slate-500">ADD TO COLLECTION</div>
+              <div className="rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
+                <div className="text-xs font-black uppercase tracking-[0.35em] text-ash-600">ADD TO COLLECTION</div>
                 <div className="mt-3 grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
-                  <input ref={customRefInputRef} value={customRef} onChange={(e) => setCustomRef(e.target.value)} placeholder="Verse reference (e.g., Jn3:16)" className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-orange-500/30" />
-                  <button type="button" onClick={addCustomVerse} className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-xs font-black text-slate-200 hover:bg-white/5">
-                    <Plus size={16} className="text-orange-300" /> ADD VERSE
+                  <input ref={customRefInputRef} value={customRef} onChange={(e) => setCustomRef(e.target.value)} placeholder="Verse reference (e.g., Jn3:16)" className="w-full rounded-xl border border-iron-800 bg-soot-900/70 px-4 py-3 text-sm text-ash-200 placeholder:text-ash-600 focus:outline-none focus:ring-2 focus:ring-gold-500/30" />
+                  <button type="button" onClick={addCustomVerse} className="inline-flex items-center gap-2 rounded-xl border border-iron-800 bg-soot-900/50 px-4 py-3 text-xs font-black text-ash-200 hover:bg-iron-800/40">
+                    <Plus size={16} className="text-gold-400" /> ADD VERSE
                   </button>
                 </div>
               </div>
             )}
 
-            <div className="rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
-              <div className="rounded-2xl border border-white/5 bg-black/30 p-6 space-y-6">
+            <div className="rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
+              <div className="rounded-2xl border border-iron-800/60 bg-soot-900/70 p-6 space-y-6">
                 <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => selectMode('blanks')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><BookOpen className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
-                  <button onClick={() => selectMode('builder')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-orange-500/40"><Layers className="text-orange-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
-                  <button onClick={() => selectMode('tf')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
-                  <button onClick={() => selectMode('reference')} className="col-span-2 sm:col-span-1 group relative bg-black/20 hover:bg-white/5 border border-white/10 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
+                  <button onClick={() => selectMode('blanks')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-gold-500/40"><BookOpen className="text-gold-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
+                  <button onClick={() => selectMode('builder')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-gold-500/40"><Layers className="text-gold-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
+                  <button onClick={() => selectMode('tf')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
+                  <button onClick={() => selectMode('reference')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
                 </div>
               </div>
             </div>
@@ -810,34 +885,34 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
         {appState === 'difficulty' && pendingMode && activeSet && (
           <div className="w-full space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
-            <button onClick={() => setAppState('menu')} className="inline-flex items-center gap-2 mb-4 rounded-full border border-white/10 bg-black/20 px-4 py-2 text-sm font-black text-slate-200 transition-colors hover:bg-white/5 hover:border-orange-500/30">
-              <ChevronRight className="rotate-180 text-orange-300" size={16} /> Back to Modes
+            <button onClick={() => setAppState('menu')} className="inline-flex items-center gap-2 mb-4 rounded-full border border-iron-800 bg-soot-900/50 px-4 py-2 text-sm font-black text-ash-200 transition-colors hover:bg-iron-800/40 hover:border-gold-500/30">
+              <ChevronRight className="rotate-180 text-gold-400" size={16} /> Back to Modes
             </button>
 
             <div className="text-center space-y-2 mb-8">
-              <p className="text-orange-300 font-mono tracking-widest text-xs uppercase">{modeLabels[pendingMode]}</p>
+              <p className="text-gold-400 font-mono tracking-widest text-xs uppercase">{modeLabels[pendingMode]}</p>
               <h2 className="text-4xl font-black text-white tracking-tight uppercase">Choose Your Level</h2>
-              <p className="text-slate-500 text-sm mt-2">Higher levels pull longer verses and hide more of the text.</p>
+              <p className="text-ash-600 text-sm mt-2">Higher levels pull longer verses and hide more of the text.</p>
             </div>
 
-            <div className="rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
-              <div className="rounded-2xl border border-white/5 bg-black/30 p-6">
+            <div className="rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
+              <div className="rounded-2xl border border-iron-800/60 bg-soot-900/70 p-6">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   {(['easy', 'normal', 'sealed'] as Difficulty[]).map((level) => {
                     const cfg = difficultyConfig[level];
                     const ring =
                       cfg.accent === 'green' ? 'hover:border-green-500/50 text-green-300'
                       : cfg.accent === 'red' ? 'hover:border-red-500/50 text-red-300'
-                      : 'hover:border-orange-500/50 text-orange-300';
+                      : 'hover:border-gold-500/50 text-gold-400';
                     return (
                       <button
                         key={level}
                         onClick={() => startGame(pendingMode, level)}
-                        className={`group relative flex flex-col gap-2 rounded-2xl border border-white/10 bg-black/20 p-5 text-left transition-all hover:bg-white/5 ${ring}`}
+                        className={`group relative flex flex-col gap-2 rounded-2xl border border-iron-800 bg-soot-900/50 p-5 text-left transition-all hover:bg-iron-800/40 ${ring}`}
                       >
                         <div className="text-[10px] font-black uppercase tracking-[0.35em] opacity-80">Level</div>
                         <h3 className="text-2xl font-black text-white">{cfg.label}</h3>
-                        <p className="text-xs text-slate-400 leading-snug">{cfg.blurb}</p>
+                        <p className="text-xs text-ash-500 leading-snug">{cfg.blurb}</p>
                       </button>
                     );
                   })}
@@ -849,20 +924,20 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
         {appState === 'playing' && currentQuestion && (
           <div className="w-full flex flex-col items-center animate-in fade-in duration-500">
-            <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-orange-500 transition-all duration-500 ease-out" style={{ width: `${(currentLevel / Math.max(activeQuestions.length, 1)) * 100}%` }} /></div>
+            <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-gold-500 transition-all duration-500 ease-out" style={{ width: `${(currentLevel / Math.max(activeQuestions.length, 1)) * 100}%` }} /></div>
 
             {currentQuestion.kind === 'blanks' && (
-              <div className="w-full max-w-2xl rounded-3xl border border-orange-500/20 bg-slate-950/50 p-2 shadow-2xl backdrop-blur-xl">
-                <div className="rounded-2xl border border-white/5 bg-black/30 p-6 sm:p-8 text-center">
-                  <div className="mb-8"><span className="text-orange-400 font-mono text-xs uppercase tracking-widest bg-orange-950/30 px-3 py-1 rounded-full border border-orange-900/50">{currentQuestion.verse.ref}</span></div>
-                  <div className="mb-4 text-xs font-black uppercase tracking-[0.35em] text-slate-500">Blank {Math.min(blankGuesses.length + 1, currentQuestion.answers.length)} of {currentQuestion.answers.length}</div>
-                  <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">{currentQuestion.promptWords.map((word, index) => {
+              <div className="w-full max-w-2xl rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
+                <div className="rounded-2xl border border-iron-800/60 bg-soot-900/70 p-6 sm:p-8 text-center">
+                  <div className="mb-8"><span className="text-gold-400 font-mono text-xs uppercase tracking-widest bg-gold-700/15 px-3 py-1 rounded-full border border-gold-700/40">{currentQuestion.verse.ref}</span></div>
+                  <div className="mb-4 text-xs font-black uppercase tracking-[0.35em] text-ash-600">Blank {Math.min(blankGuesses.length + 1, currentQuestion.answers.length)} of {currentQuestion.answers.length}</div>
+                  <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">{currentQuestion.promptWords.map((word, index) => {
                     const blankIndex = currentQuestion.promptWords.slice(0, index + 1).filter((item) => item.startsWith('_____')).length - 1;
                     if (!word.startsWith('_____')) return `${word} `;
                     const guessedWord = blankIndex >= 0 ? blankGuesses[blankIndex] : undefined;
                     return `${guessedWord ?? word} `;
                   })}</div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{currentBlankOptions.map((opt, i) => <button key={`${opt}-${i}`} onClick={() => handleBlankChoice(opt)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-orange-500'}`}>{opt}</button>)}</div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{currentBlankOptions.map((opt, i) => <button key={`${opt}-${i}`} onClick={() => handleBlankChoice(opt)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>)}</div>
                 </div>
               </div>
             )}
@@ -882,24 +957,24 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
             {currentQuestion.kind === 'reference' && (
               <div className="w-full max-w-2xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
                 <div className="mb-8"><span className="text-purple-400 font-mono text-xs uppercase tracking-widest bg-purple-950/30 px-3 py-1 rounded-full border border-purple-900/50">Identify Reference</span></div>
-                <div className="text-xl sm:text-2xl font-serif text-slate-200 leading-relaxed mb-10">“{currentQuestion.prompt}”</div>
+                <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">“{currentQuestion.prompt}”</div>
                 <div className="grid grid-cols-2 gap-3">{currentQuestion.options.map((opt, i) => <button key={i} onClick={() => handleAnswer(opt === currentQuestion.correct)} disabled={feedback !== null} className="p-4 rounded-xl text-lg font-mono font-bold border-2 bg-neutral-800 border-neutral-700 hover:border-purple-500">{opt}</button>)}</div>
               </div>
             )}
 
             {currentQuestion.kind === 'builder' && (
               <div className="w-full max-w-2xl flex flex-col items-center">
-                <div className="mb-4 text-sm font-black text-orange-300">{currentQuestion.verse.ref}</div>
+                <div className="mb-4 text-sm font-black text-gold-400">{currentQuestion.verse.ref}</div>
                 <div className="w-full bg-neutral-900 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-neutral-700 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
-                  {builderState.selected.map((chunk, i) => <div key={`${chunk}-${i}`} className="inline-flex items-center gap-1 rounded-lg border border-orange-500/30 bg-orange-500/15 px-2 py-2 text-white shadow-lg"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-black text-orange-200 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderState.selected.length - 1} className="rounded-md border border-white/10 bg-black/20 px-2 py-1 text-[10px] font-black text-orange-200 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>)}
-                  {builderState.selected.length > 0 && !feedback && <button onClick={handleBuilderUndo} className="absolute bottom-4 right-4 text-xs text-slate-400 hover:text-white underline">Undo Last</button>}
+                  {builderState.selected.map((chunk, i) => <div key={`${chunk}-${i}`} className="inline-flex items-center gap-1 rounded-lg border border-gold-500/30 bg-gold-500/15 px-2 py-2 text-soot-950 shadow-lg"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderState.selected.length - 1} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>)}
+                  {builderState.selected.length > 0 && !feedback && <button onClick={handleBuilderUndo} className="absolute bottom-4 right-4 text-xs text-ash-500 hover:text-white underline">Undo Last</button>}
                 </div>
-                <div className="mb-3 text-xs font-black uppercase tracking-[0.3em] text-slate-500">Tap words below, then reorder the placed line</div>
+                <div className="mb-3 text-xs font-black uppercase tracking-[0.3em] text-ash-600">Tap words below, then reorder the placed line</div>
                 <div className="mb-4 flex items-center gap-3">
-                  <button onClick={handleBuilderConfirm} disabled={feedback !== null || builderState.scrambled.length > 0 || builderState.selected.length === 0} className="rounded-2xl border border-orange-400/30 bg-orange-600 px-5 py-3 text-sm font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-orange-500 disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
-                  {builderState.scrambled.length === 0 && !feedback && <span className="text-xs font-black uppercase tracking-[0.25em] text-orange-300/80">Ready when you are</span>}
+                  <button onClick={handleBuilderConfirm} disabled={feedback !== null || builderState.scrambled.length > 0 || builderState.selected.length === 0} className="btn-primary rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.2em] disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
+                  {builderState.scrambled.length === 0 && !feedback && <span className="text-xs font-black uppercase tracking-[0.25em] text-gold-400/80">Ready when you are</span>}
                 </div>
-                <div className="flex flex-wrap justify-center gap-3">{builderState.scrambled.map((chunk, i) => <button key={`${chunk}-${i}`} onClick={() => handleBuilderClick(chunk)} disabled={feedback !== null} className="border border-orange-500/20 bg-neutral-800 px-4 py-3 rounded-xl font-medium text-slate-200 shadow-md transition-all hover:border-orange-500 hover:bg-neutral-700 active:scale-95">{chunk}</button>)}</div>
+                <div className="flex flex-wrap justify-center gap-3">{builderState.scrambled.map((chunk, i) => <button key={`${chunk}-${i}`} onClick={() => handleBuilderClick(chunk)} disabled={feedback !== null} className="border border-gold-500/20 bg-neutral-800 px-4 py-3 rounded-xl font-medium text-ash-200 shadow-md transition-all hover:border-gold-500 hover:bg-neutral-700 active:scale-95">{chunk}</button>)}</div>
               </div>
             )}
           </div>
@@ -909,41 +984,41 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
           const totalQuestions = activeQuestions.length;
           const accuracy = totalQuestions ? Math.round((correctCount / totalQuestions) * 100) : 0;
           return (
-            <div className="max-w-md w-full bg-neutral-900 p-8 rounded-2xl border border-white/10 text-center space-y-6 animate-in zoom-in duration-300">
+            <div className="max-w-md w-full bg-neutral-900 p-8 rounded-2xl border border-iron-800 text-center space-y-6 animate-in zoom-in duration-300">
               <Award className="w-16 h-16 text-yellow-400 mx-auto" />
               <div className="space-y-1">
                 <h2 className="text-3xl font-black text-white">Run Complete!</h2>
-                <p className="text-sm text-slate-400">You got <span className="font-black text-orange-300">{correctCount}</span> of <span className="font-black text-white">{totalQuestions}</span> verses correct.</p>
+                <p className="text-sm text-ash-500">You got <span className="font-black text-gold-400">{correctCount}</span> of <span className="font-black text-white">{totalQuestions}</span> verses correct.</p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                <div className="rounded-2xl border border-orange-500/20 bg-orange-950/20 p-4">
-                  <div className="text-[11px] font-black uppercase tracking-[0.25em] text-orange-300/80">Correct</div>
-                  <div className="mt-1 text-3xl font-black text-white">{correctCount}<span className="text-lg text-slate-500">/{totalQuestions}</span></div>
+                <div className="rounded-2xl border border-gold-500/20 bg-gold-700/12 p-4">
+                  <div className="text-[11px] font-black uppercase tracking-[0.25em] text-gold-400/80">Correct</div>
+                  <div className="mt-1 text-3xl font-black text-white">{correctCount}<span className="text-lg text-ash-600">/{totalQuestions}</span></div>
                 </div>
-                <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
-                  <div className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Accuracy</div>
+                <div className="rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
+                  <div className="text-[11px] font-black uppercase tracking-[0.25em] text-ash-500">Accuracy</div>
                   <div className="mt-1 text-3xl font-black text-white">{accuracy}%</div>
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-white/10 bg-black/20 p-4">
+              <div className="rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
                 <div className="flex items-center justify-between">
                   <div className="text-left">
-                    <div className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Points</div>
+                    <div className="text-[11px] font-black uppercase tracking-[0.25em] text-ash-500">Points</div>
                     <div className="text-3xl font-black text-white">{score}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] font-black uppercase tracking-[0.25em] text-slate-400">Best Streak</div>
+                    <div className="text-[11px] font-black uppercase tracking-[0.25em] text-ash-500">Best Streak</div>
                     <div className="text-3xl font-black text-white">{bestStreak}x</div>
                   </div>
                 </div>
-                <div className="mt-3 border-t border-white/10 pt-3 text-xs text-slate-500">
+                <div className="mt-3 border-t border-iron-800 pt-3 text-xs text-ash-600">
                   10 points per correct answer, plus a streak bonus (+2 for each answer in a row).
                 </div>
               </div>
 
-              <button onClick={() => setAppState('menu')} className="w-full py-3 bg-white text-slate-900 font-bold rounded-xl hover:bg-slate-200">Continue</button>
+              <button onClick={() => setAppState('menu')} className="btn-primary w-full py-3 font-bold rounded-xl">Continue</button>
             </div>
           );
         })()}
@@ -951,20 +1026,20 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
       {selectedVerse && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button type="button" className="absolute inset-0 bg-black/80" onClick={() => setSelectedVerse(null)} aria-label="Close verse modal" />
-          <div className="relative w-full max-w-2xl rounded-2xl border border-orange-500/30 bg-slate-950/85 backdrop-blur-xl shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 p-4">
+          <button type="button" className="absolute inset-0 bg-soot-950/90" onClick={() => setSelectedVerse(null)} aria-label="Close verse modal" />
+          <div className="relative w-full max-w-2xl rounded-2xl border border-gold-500/30 bg-soot-900/85 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-iron-800 p-4">
               <div>
-                <div className="text-sm font-bold tracking-widest text-slate-200">VERSE</div>
+                <div className="text-sm font-bold tracking-widest text-ash-200">VERSE</div>
                 <div className="mt-1 text-lg font-black text-white">{selectedVerse.ref}</div>
               </div>
-              <button type="button" onClick={() => setSelectedVerse(null)} className="rounded-lg px-3 py-1 text-xs font-bold text-slate-300 hover:bg-white/5">CLOSE</button>
+              <button type="button" onClick={() => setSelectedVerse(null)} className="rounded-lg px-3 py-1 text-xs font-bold text-ash-300 hover:bg-iron-800/40">CLOSE</button>
             </div>
             <div className="p-4 space-y-4">
-              <div className="rounded-xl border border-white/10 bg-black/30 p-4 text-sm leading-7 text-slate-100">{selectedVerse.text}</div>
-              <div className="rounded-xl border border-white/10 bg-black/20 p-4">
-                <div className="text-xs font-black uppercase tracking-[0.35em] text-slate-500">PREVIEW</div>
-                <div className="mt-2 text-sm text-slate-300">{generateVersePreview(selectedVerse.text)}</div>
+              <div className="rounded-xl border border-iron-800 bg-soot-900/70 p-4 text-sm leading-7 text-ash-200">{selectedVerse.text}</div>
+              <div className="rounded-xl border border-iron-800 bg-soot-900/50 p-4">
+                <div className="text-xs font-black uppercase tracking-[0.35em] text-ash-600">PREVIEW</div>
+                <div className="mt-2 text-sm text-ash-300">{generateVersePreview(selectedVerse.text)}</div>
               </div>
             </div>
           </div>
@@ -973,22 +1048,22 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
       {showAllVerses && activeSet && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <button type="button" className="absolute inset-0 bg-black/80" onClick={() => setShowAllVerses(false)} aria-label="Close loaded verses modal" />
-          <div className="relative w-full max-w-4xl rounded-2xl border border-orange-500/30 bg-slate-950/90 backdrop-blur-xl shadow-2xl">
-            <div className="flex items-center justify-between border-b border-white/10 p-4">
+          <button type="button" className="absolute inset-0 bg-soot-950/90" onClick={() => setShowAllVerses(false)} aria-label="Close loaded verses modal" />
+          <div className="relative w-full max-w-4xl rounded-2xl border border-gold-500/30 bg-soot-900/90 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-iron-800 p-4">
               <div>
-                <div className="text-sm font-bold tracking-widest text-slate-200">LOADED VERSES</div>
+                <div className="text-sm font-bold tracking-widest text-ash-200">LOADED VERSES</div>
                 <div className="mt-1 text-lg font-black text-white">{activeSet.title}</div>
-                <div className="text-xs text-slate-400">{activeSet.verses.length} passages loaded</div>
+                <div className="text-xs text-ash-500">{activeSet.verses.length} passages loaded</div>
               </div>
-              <button type="button" onClick={() => setShowAllVerses(false)} className="rounded-lg px-3 py-1 text-xs font-bold text-slate-300 hover:bg-white/5">CLOSE</button>
+              <button type="button" onClick={() => setShowAllVerses(false)} className="rounded-lg px-3 py-1 text-xs font-bold text-ash-300 hover:bg-iron-800/40">CLOSE</button>
             </div>
             <div className="max-h-[70vh] overflow-y-auto p-4">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {activeSet.verses.map((verse) => (
-                  <button key={verse.ref} type="button" onClick={() => { setShowAllVerses(false); setSelectedVerse(verse); }} className="rounded-xl border border-white/10 bg-black/20 px-4 py-3 text-left transition-colors hover:bg-white/5 hover:border-orange-500/30">
-                    <div className="text-sm font-black text-slate-100">{verse.ref}</div>
-                    <div className="mt-1 text-xs leading-snug text-slate-400">{generateVersePreview(verse.text)}</div>
+                  <button key={verse.ref} type="button" onClick={() => { setShowAllVerses(false); setSelectedVerse(verse); }} className="rounded-xl border border-iron-800 bg-soot-900/50 px-4 py-3 text-left transition-colors hover:bg-iron-800/40 hover:border-gold-500/30">
+                    <div className="text-sm font-black text-ash-200">{verse.ref}</div>
+                    <div className="mt-1 text-xs leading-snug text-ash-500">{generateVersePreview(verse.text)}</div>
                   </button>
                 ))}
               </div>

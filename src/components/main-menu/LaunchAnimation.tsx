@@ -34,22 +34,22 @@ const LaunchAnimation: React.FC<LaunchAnimationProps> = ({ onComplete }) => {
       aria-label="Skip intro"
     >
       <div className="relative flex items-center justify-center">
-        <span className="rf-launch-ring absolute h-40 w-40 rounded-full border border-orange-400/40" />
-        <span className="rf-launch-ring absolute h-40 w-40 rounded-full border border-orange-500/30" style={{ animationDelay: '0.55s' }} />
-        <div className="rf-launch-flame inline-flex items-center justify-center rounded-3xl border border-orange-500/30 bg-black/40 p-6 shadow-2xl backdrop-blur-xl">
+        <span className="rf-launch-ring absolute h-40 w-40 rounded-full border border-gold-400/40" />
+        <span className="rf-launch-ring absolute h-40 w-40 rounded-full border border-gold-500/30" style={{ animationDelay: '0.55s' }} />
+        <div className="rf-launch-flame inline-flex items-center justify-center rounded-3xl border border-gold-500/30 bg-soot-950/60 p-6 shadow-2xl ">
           <img src={FIRE_GIF} alt="Fire" className="h-24 w-24 object-contain" />
         </div>
       </div>
 
-      <div className="rf-launch-title mt-10 bg-gradient-to-r from-orange-300 via-orange-400 to-red-500 bg-clip-text text-center text-5xl font-black uppercase tracking-tight text-transparent sm:text-6xl">
+      <div className="rf-launch-title mt-10 bg-gradient-to-r from-gold-400 via-gold-400 to-red-500 bg-clip-text text-center text-5xl font-black uppercase tracking-tight text-transparent sm:text-6xl">
         Refiner&apos;s Fire
       </div>
 
-      <div className="rf-launch-tagline mt-4 text-center text-[11px] font-black uppercase tracking-[0.35em] text-slate-400">
+      <div className="rf-launch-tagline mt-4 text-center text-[11px] font-black uppercase tracking-[0.35em] text-ash-500">
         A dramatic Bible challenge, forged in Revelation.
       </div>
 
-      <div className="rf-launch-tagline absolute bottom-10 text-[10px] font-bold uppercase tracking-[0.35em] text-slate-600">
+      <div className="rf-launch-tagline absolute bottom-10 text-[10px] font-bold uppercase tracking-[0.35em] text-ash-600">
         Tap to skip
       </div>
     </div>

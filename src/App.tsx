@@ -1,21 +1,28 @@
 import React, { useEffect, useState } from 'react';
-import { signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, linkWithPopup } from 'firebase/auth';
 import RevelationGame from './components/revelation-game/index';
 import MemoryGame from './components/memory-game/GameifiedMemoryGame';
 import MainMenu from './components/main-menu/MainMenu';
 import AuthModal from './components/main-menu/AuthModal';
 import BackgroundShell from './components/main-menu/BackgroundShell';
 import LaunchAnimation from './components/main-menu/LaunchAnimation';
+import ProfilePage from './components/profile/ProfilePage';
+import DailyChallenge from './components/daily/DailyChallenge';
+import FurnaceGame from './components/daily/FurnaceGame';
 import { auth } from './utils/firebase';
+import { subscribeUserProfile, type UserProfile } from './utils/userProfile';
+import { subscribeUserStats, type UserStats } from './utils/userStats';
 
 const App: React.FC = () => {
-  const [mode, setMode] = useState<'old_testament' | 'gospels' | 'new_testament' | 'revelation' | 'alpha_omega' | 'live_group' | null>(null);
+  const [mode, setMode] = useState<'old_testament' | 'gospels' | 'new_testament' | 'revelation' | 'alpha_omega' | 'live_group' | 'profile' | 'daily' | 'furnace' | null>(null);
 
   const [showLaunch, setShowLaunch] = useState(true);
   const [user, setUser] = useState<any>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [stats, setStats] = useState<UserStats | null>(null);
 
   useEffect(() => {
     if (!auth) {
@@ -44,12 +51,51 @@ const App: React.FC = () => {
     await createUserWithEmailAndPassword(auth, email, password);
   };
 
+  const handleGoogleAuth = async () => {
+    if (!auth) throw new Error('Auth unavailable.');
+    const a = auth;
+    const provider = new GoogleAuthProvider();
+    const current = a.currentUser;
+
+    // Everyone starts as an anonymous user, and live-session seats are keyed by uid.
+    // Linking upgrades that same account in place so the uid survives; a returning player
+    // whose Google account already exists lands in the catch and signs in normally.
+    if (current?.isAnonymous) {
+      try {
+        const linked = await linkWithPopup(current, provider);
+        setUser(linked.user);
+        return;
+      } catch (err: unknown) {
+        const code = (err as { code?: string })?.code;
+        if (code !== 'auth/credential-already-in-use' && code !== 'auth/email-already-in-use') throw err;
+      }
+    }
+
+    const result = await signInWithPopup(a, provider);
+    setUser(result.user);
+  };
+
   const handleLogout = async () => {
     if (!auth) return;
     await signOut(auth);
   };
 
   const isMember = !!user && !user.isAnonymous;
+
+  // Reservation rules block anonymous users from reading the profile, so only subscribe once the
+  // user is a real member. Clearing in cleanup (rather than synchronously) means switching
+  // accounts can't briefly show the previous user's name.
+  useEffect(() => {
+    if (!isMember || !user) return;
+    const unsubProfile = subscribeUserProfile(user.uid, setProfile, console.error);
+    const unsubStats = subscribeUserStats(user.uid, setStats, console.error);
+    return () => {
+      unsubProfile();
+      unsubStats();
+      setProfile(null);
+      setStats(null);
+    };
+  }, [isMember, user]);
 
   if (showLaunch) {
     return <LaunchAnimation onComplete={() => setShowLaunch(false)} />;
@@ -60,10 +106,22 @@ const App: React.FC = () => {
       <>
         <MainMenu
           isMember={isMember}
+          profile={profile}
+          streak={stats?.currentStreak ?? 0}
+          onOpenDaily={() => setMode('daily')}
+          onOpenFurnace={() => setMode('furnace')}
           onSelectMode={(m) => setMode(m)}
           onOpenAuth={(tab) => {
             setAuthModalTab(tab || 'login');
             setAuthModalOpen(true);
+          }}
+          onOpenProfile={() => {
+            // Profiles are account-only, so a guest who taps Profile gets the sign-up prompt.
+            if (isMember) setMode('profile');
+            else {
+              setAuthModalTab('register');
+              setAuthModalOpen(true);
+            }
           }}
           onLogout={handleLogout}
         />
@@ -74,6 +132,7 @@ const App: React.FC = () => {
           onClose={() => setAuthModalOpen(false)}
           onLogin={handleLogin}
           onRegister={handleRegister}
+          onGoogle={handleGoogleAuth}
         />
       </>
     );
@@ -81,6 +140,35 @@ const App: React.FC = () => {
 
   return (
     <BackgroundShell>
+      {mode === 'profile' && isMember && user && (
+        <ProfilePage user={user} onBack={() => setMode(null)} />
+      )}
+      {mode === 'daily' && (
+        <DailyChallenge
+          user={user}
+          isMember={isMember}
+          profile={profile}
+          onBack={() => setMode(null)}
+          onOpenAuth={() => {
+            setMode(null);
+            setAuthModalTab('register');
+            setAuthModalOpen(true);
+          }}
+        />
+      )}
+      {mode === 'furnace' && (
+        <FurnaceGame
+          user={user}
+          isMember={isMember}
+          profile={profile}
+          onBack={() => setMode(null)}
+          onOpenAuth={() => {
+            setMode(null);
+            setAuthModalTab('register');
+            setAuthModalOpen(true);
+          }}
+        />
+      )}
       {(mode === 'old_testament' || mode === 'gospels' || mode === 'new_testament' || mode === 'alpha_omega') && (
         <MemoryGame
           onBack={() => setMode(null)}
