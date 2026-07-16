@@ -344,7 +344,7 @@ const FurnaceGame: React.FC<FurnaceGameProps> = ({ user, isMember, profile, onBa
 };
 
 const Shell: React.FC<{ onBack: () => void; children: React.ReactNode }> = ({ onBack, children }) => (
-  <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col px-6 py-10">
+  <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-10">
     <div className="mb-6 flex items-center justify-between">
       <button
         type="button"

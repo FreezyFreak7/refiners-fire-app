@@ -316,7 +316,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack }) => {
       : savedIds;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-3xl flex-col px-6 py-10">
+    <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-6 py-10">
       <div className="flex items-center justify-between">
         <button
           type="button"

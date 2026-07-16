@@ -1002,7 +1002,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
             <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-gold-500 transition-all duration-500 ease-out" style={{ width: `${(currentLevel / Math.max(activeQuestions.length, 1)) * 100}%` }} /></div>
 
             {currentQuestion.kind === 'blanks' && (
-              <div className="w-full max-w-2xl rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
+              <div className="w-full max-w-3xl rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
                 <div className="rounded-2xl border border-iron-800/60 bg-soot-900/70 p-6 sm:p-8 text-center">
                   <div className="mb-8"><span className="text-gold-400 font-mono text-xs uppercase tracking-widest bg-gold-700/15 px-3 py-1 rounded-full border border-gold-700/40">{currentQuestion.verse.ref}</span></div>
                   <div className="mb-4 text-xs font-black uppercase tracking-[0.35em] text-ash-600">Blank {Math.min(blankGuesses.length + 1, currentQuestion.answers.length)} of {currentQuestion.answers.length}</div>
@@ -1018,7 +1018,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
             )}
 
             {currentQuestion.kind === 'reference' && (
-              <div className="w-full max-w-2xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
+              <div className="w-full max-w-3xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
                 <div className="mb-8"><span className="text-purple-400 font-mono text-xs uppercase tracking-widest bg-purple-950/30 px-3 py-1 rounded-full border border-purple-900/50">Identify Reference</span></div>
                 <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">“{currentQuestion.prompt}”</div>
                 <div className="grid grid-cols-2 gap-3">{currentQuestion.options.map((opt, i) => <button key={i} onClick={() => handleAnswer(opt === currentQuestion.correct)} disabled={feedback !== null} className="p-4 rounded-xl text-lg font-mono font-bold border-2 bg-neutral-800 border-neutral-700 hover:border-purple-500">{opt}</button>)}</div>
@@ -1026,7 +1026,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
             )}
 
             {currentQuestion.kind === 'builder' && (
-              <div className="w-full max-w-2xl flex flex-col items-center">
+              <div className="w-full max-w-3xl flex flex-col items-center">
                 <div className="mb-4 text-sm font-black text-gold-400">{currentQuestion.verse.ref}</div>
                 <div className="w-full bg-neutral-900 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-neutral-700 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
                   {builderState.selected.map((chunk, i) => <div key={`${chunk}-${i}`} className="inline-flex items-center gap-1 rounded-lg border border-gold-500/30 bg-gold-500/15 px-2 py-2 text-soot-950 shadow-lg"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderState.selected.length - 1} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>)}
@@ -1090,7 +1090,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
       {selectedVerse && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button type="button" className="absolute inset-0 bg-soot-950/90" onClick={() => setSelectedVerse(null)} aria-label="Close verse modal" />
-          <div className="relative w-full max-w-2xl rounded-2xl border border-gold-500/30 bg-soot-900/85 shadow-2xl">
+          <div className="relative w-full max-w-3xl rounded-2xl border border-gold-500/30 bg-soot-900/85 shadow-2xl">
             <div className="flex items-center justify-between border-b border-iron-800 p-4">
               <div>
                 <div className="text-sm font-bold tracking-widest text-ash-200">VERSE</div>

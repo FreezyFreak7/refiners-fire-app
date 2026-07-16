@@ -124,7 +124,7 @@ const VersePicker: React.FC<VersePickerProps> = ({
         aria-label="Close verse picker"
       />
 
-      <div className="relative flex h-[80vh] w-full max-w-2xl flex-col rounded-2xl border border-gold-500/30 bg-soot-900/90 shadow-2xl ">
+      <div className="relative flex h-[80vh] w-full max-w-3xl flex-col rounded-2xl border border-gold-500/30 bg-soot-900/90 shadow-2xl ">
         <div className="flex items-center justify-between border-b border-iron-800 p-4">
           <div className="text-sm font-black tracking-widest text-ash-200">
             {title.toUpperCase()}

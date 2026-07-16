@@ -551,7 +551,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
       const currentQ = activeQuestions[roomData.questionIndex];
       if (!currentQ) return <div className="text-white">Loading Question...</div>;
       return (
-        <div className="w-full max-w-2xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
+        <div className="w-full max-w-3xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
           <div className="flex justify-between items-center mb-4"><span className="text-gold-400 font-mono text-xs uppercase bg-gold-700/15 px-3 py-1 rounded-full border border-gold-700/40">Question {roomData.questionIndex + 1} / {activeQuestions.length}</span>{isHost && (<button onClick={mpNextQuestion} className="btn-primary px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2">Next <ArrowRight size={16} /></button>)}</div>
           {(() => {
             const pct = mpDurationMs > 0 ? Math.max(0, Math.min(100, (mpTimeLeft / mpDurationMs) * 100)) : 0;
@@ -751,7 +751,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
            <div className="w-full flex flex-col items-center animate-in fade-in duration-500">
               <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-gold-500 transition-all duration-500 ease-out" style={{ width: `${((currentLevel) / activeQuestions.length) * 100}%` }}></div></div>
               {gameMode === 'blanks' && (
-                <div className="w-full max-w-2xl rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
+                <div className="w-full max-w-3xl rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
                   <div className="rounded-2xl border border-iron-800/60 bg-soot-900/70 p-6 sm:p-8 relative overflow-hidden text-center">
                     <div className="mb-8"><span className="text-gold-400 font-mono text-xs uppercase tracking-widest bg-gold-700/15 px-3 py-1 rounded-full border border-gold-700/40">Rev {activeQuestions[currentLevel].verse}</span></div>
                     <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">{activeQuestions[currentLevel].textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold ${feedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : feedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-gold-500/50 text-transparent min-w-[80px]'}`}>{feedback === 'correct' || feedback === 'incorrect' ? activeQuestions[currentLevel].blank : '_____'}</span> {activeQuestions[currentLevel].textAfter}</div>
@@ -761,7 +761,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 </div>
               )}
               {gameMode === 'guess_verse' && (
-                <div className="w-full max-w-2xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl relative overflow-hidden text-center">
+                <div className="w-full max-w-3xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl relative overflow-hidden text-center">
                   <div className="mb-8"><span className="text-purple-400 font-mono text-xs uppercase tracking-widest bg-purple-950/30 px-3 py-1 rounded-full border border-purple-900/50">Identify Reference</span></div>
                   <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">"{activeQuestions[currentLevel].text}"</div>
                   {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
@@ -769,7 +769,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 </div>
               )}
               {gameMode === 'builder' && (
-                <div className="w-full max-w-2xl flex flex-col items-center">
+                <div className="w-full max-w-3xl flex flex-col items-center">
                   <div className="w-full bg-neutral-900 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-neutral-700 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
                     {builderData.selected.map((chunk, i) => (<div key={i} className="inline-flex items-center gap-1 rounded-lg border border-gold-500/30 bg-gold-500/15 px-2 py-2 text-soot-950 shadow-lg animate-in zoom-in duration-200"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderData.selected.length - 1} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>))}
                     {builderData.selected.length > 0 && !feedback && (<button onClick={handleBuilderUndo} className="absolute bottom-4 right-4 text-xs text-ash-500 hover:text-white underline">Undo Last</button>)}

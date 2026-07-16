@@ -177,7 +177,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
           </div>
 
         {/* Challenges — competitive modes with world leaderboards, given top billing. */}
-        <div className="mb-5 grid w-full max-w-xl gap-2 sm:grid-cols-2">
+        <div className="mb-5 grid w-full max-w-3xl gap-2 sm:grid-cols-2">
           <button
             type="button"
             onClick={onOpenDaily}
@@ -218,7 +218,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
         </div>
 
         {/* Tabs as struck plates on a rail, not pills in a tray. The active one is lit from below. */}
-        <div className="mb-5 grid w-full max-w-xl grid-cols-2 border-b border-iron-800">
+        <div className="mb-5 grid w-full max-w-3xl grid-cols-2 border-b border-iron-800">
           <button
             type="button"
             onClick={() => setTab('libraries')}
@@ -247,7 +247,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
 
         {/* Both panels share one grid cell, so the row is always as tall as the taller panel
             and nothing below the tabs moves when you switch between them. */}
-        <div className="grid w-full max-w-xl">
+        <div className="grid w-full max-w-3xl">
         <div
           className={`[grid-area:1/1] plate w-full self-start p-6 ${
             tab === 'libraries' ? '' : 'invisible'
@@ -333,7 +333,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
         </div>
 
         {/* Secondary actions read as engraved text on the plate, not as three more buttons. */}
-        <div className="mt-8 flex w-full max-w-xl items-center justify-center gap-6">
+        <div className="mt-8 flex w-full max-w-3xl items-center justify-center gap-6">
           <button
             type="button"
             onClick={() => setPanel('how')}
