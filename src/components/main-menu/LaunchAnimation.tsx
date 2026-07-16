@@ -27,7 +27,7 @@ const LaunchAnimation: React.FC<LaunchAnimationProps> = ({ onComplete }) => {
 
   return (
     <div
-      className="rf-launch fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[radial-gradient(circle_at_top,rgba(255,126,61,0.18),transparent_30%),linear-gradient(180deg,#050608_0%,#0a0b0f_45%,#020202_100%)]"
+      className="rf-launch fixed inset-0 z-[100] flex flex-col items-center justify-center bg-soot-950 bg-[radial-gradient(55%_45%_at_50%_0%,rgba(255,176,106,0.16),rgba(8,7,10,0)_60%),radial-gradient(75%_60%_at_50%_100%,rgba(232,84,15,0.30),rgba(8,7,10,0)_78%)]"
       onClick={finish}
       role="button"
       tabIndex={0}
@@ -41,15 +41,18 @@ const LaunchAnimation: React.FC<LaunchAnimationProps> = ({ onComplete }) => {
         </div>
       </div>
 
-      <div className="rf-launch-title mt-10 bg-gradient-to-r from-gold-400 via-gold-400 to-red-500 bg-clip-text text-center text-5xl font-black uppercase tracking-tight text-transparent sm:text-6xl">
+      {/* Title matches the home screen exactly: struck condensed ink, no gradient fill. */}
+      <h1 className="rf-launch-title struck mt-10 text-center text-6xl sm:text-7xl">
         Refiner&apos;s Fire
-      </div>
+      </h1>
 
-      <div className="rf-launch-tagline mt-4 text-center text-[11px] font-black uppercase tracking-[0.35em] text-ash-500">
+      <div className="rf-launch-tagline mx-auto mt-5 w-40 rule-fade" />
+
+      <p className="rf-launch-tagline mt-5 text-center text-sm text-ash-500">
         A dramatic Bible challenge, forged in Revelation.
-      </div>
+      </p>
 
-      <div className="rf-launch-tagline absolute bottom-10 text-[10px] font-bold uppercase tracking-[0.35em] text-ash-600">
+      <div className="rf-launch-tagline absolute bottom-10 font-display text-xs font-semibold uppercase tracking-forge text-ash-600">
         Tap to skip
       </div>
     </div>

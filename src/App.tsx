@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, linkWithPopup } from 'firebase/auth';
+import { signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithCredential, linkWithPopup, type AuthError } from 'firebase/auth';
 import RevelationGame from './components/revelation-game/index';
 import MemoryGame from './components/memory-game/GameifiedMemoryGame';
 import MainMenu from './components/main-menu/MainMenu';
@@ -57,9 +57,8 @@ const App: React.FC = () => {
     const provider = new GoogleAuthProvider();
     const current = a.currentUser;
 
-    // Everyone starts as an anonymous user, and live-session seats are keyed by uid.
-    // Linking upgrades that same account in place so the uid survives; a returning player
-    // whose Google account already exists lands in the catch and signs in normally.
+    // Everyone starts as an anonymous user, and live-session seats are keyed by uid, so we link
+    // the Google account onto the existing one to keep that uid.
     if (current?.isAnonymous) {
       try {
         const linked = await linkWithPopup(current, provider);
@@ -68,6 +67,16 @@ const App: React.FC = () => {
       } catch (err: unknown) {
         const code = (err as { code?: string })?.code;
         if (code !== 'auth/credential-already-in-use' && code !== 'auth/email-already-in-use') throw err;
+
+        // Returning player: the Google account already exists, so linking fails — but the popup
+        // we just showed already collected the credential. Reuse it rather than opening a second
+        // popup, which browsers block because we are no longer inside the click's user gesture.
+        const credential = GoogleAuthProvider.credentialFromError(err as AuthError);
+        if (credential) {
+          const result = await signInWithCredential(a, credential);
+          setUser(result.user);
+          return;
+        }
       }
     }
 
