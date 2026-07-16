@@ -405,32 +405,4 @@ export const expandedGameData = {
       { verse: '22:20', chunks: ['Amen.', 'Come,', 'Lord Jesus.'] },
     ],
   },
-  deep_theology: {
-    blanks: [
-      { verse: 'General', textBefore: 'The number 144,000 is a multiple of', blank: '12', textAfter: ', symbolizing covenant fullness.', options: ['12', '7', '10', '3'] },
-      { verse: 'General', textBefore: 'Seven in Revelation often symbolizes spiritual', blank: 'completeness', textAfter: '.', options: ['completeness', 'confusion', 'conflict', 'creation'] },
-      { verse: 'General', textBefore: 'Babylon represents a global system in organized rebellion against', blank: 'God', textAfter: '.', options: ['God', 'Israel', 'Rome', 'angels'] },
-    ],
-    tf: [
-      { verse: 'General', text: 'Revelation uses symbols without any Old Testament background.', isTrue: false, explanation: 'Its symbolism is heavily rooted in earlier Scripture.' },
-      { verse: 'General', text: 'The Lamb and the Beast represent rival kingdoms and loyalties.', isTrue: true, explanation: 'Correct.' },
-    ],
-    builder: [
-      { verse: 'General', chunks: ['Revelation reveals', 'Jesus Christ,', 'his victory,', 'and the end', 'of evil powers.'] },
-    ],
-  },
-  greek_roots: {
-    blanks: [
-      { verse: 'Greek', textBefore: 'The Greek word for witness is', blank: 'martys', textAfter: '.', options: ['angelos', 'martys', 'logos', 'kratos'] },
-      { verse: 'Greek', textBefore: 'Apokalypsis means an', blank: 'unveiling', textAfter: 'or revelation.', options: ['unveiling', 'ending', 'judgment', 'vision'] },
-      { verse: 'Greek', textBefore: 'Amen carries the idea of certainty and', blank: 'truth', textAfter: '.', options: ['truth', 'mystery', 'warning', 'silence'] },
-    ],
-    tf: [
-      { verse: 'Greek', text: 'The title Apocalypse means concealment.', isTrue: false, explanation: 'It means unveiling or disclosure.' },
-      { verse: 'Greek', text: 'Martys eventually became associated with martyr because of faithful witness unto death.', isTrue: true, explanation: 'Correct.' },
-    ],
-    builder: [
-      { verse: 'Greek', chunks: ['Apokalypsis means', 'an unveiling,', 'a revealing,', 'a disclosure.'] },
-    ],
-  },
 };

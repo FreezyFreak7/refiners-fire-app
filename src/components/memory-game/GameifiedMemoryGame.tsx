@@ -4,14 +4,12 @@ import {
   ArrowLeft,
   Award,
   BookOpen,
-  CheckCircle,
   ChevronRight,
   Flame,
   Home,
   Layers,
   Plus,
   Search,
-  XCircle,
 } from 'lucide-react';
 import { loadBible, type BibleData } from '../../utils/bible';
 
@@ -33,7 +31,7 @@ type CustomCollection = {
 };
 
 type VerseLookupResult = { ref: string; text: string };
-type GameMode = 'blanks' | 'builder' | 'tf' | 'reference';
+type GameMode = 'blanks' | 'builder' | 'reference';
 type AppState = 'library' | 'menu' | 'difficulty' | 'playing' | 'finished';
 
 type BlanksQuestion = {
@@ -50,14 +48,6 @@ type BuilderQuestion = {
   chunks: string[];
 };
 
-type TfQuestion = {
-  kind: 'tf';
-  verse: VerseRecord;
-  statement: string;
-  isTrue: boolean;
-  explanation: string;
-};
-
 type ReferenceQuestion = {
   kind: 'reference';
   verse: VerseRecord;
@@ -66,7 +56,7 @@ type ReferenceQuestion = {
   options: string[];
 };
 
-type Question = BlanksQuestion | BuilderQuestion | TfQuestion | ReferenceQuestion;
+type Question = BlanksQuestion | BuilderQuestion | ReferenceQuestion;
 
 type BuilderState = {
   target: string[];
@@ -151,7 +141,6 @@ const difficultyConfig: Record<Difficulty, DifficultySettings> = {
 const modeLabels: Record<GameMode, string> = {
   blanks: 'Fill Blanks',
   builder: 'Builder',
-  tf: 'True or Lie',
   reference: 'Reference',
 };
 
@@ -341,29 +330,7 @@ const createBuilderQuestion = (verse: VerseRecord, wordsPerChunk: number): Build
   return { kind: 'builder', verse, chunks };
 };
 
-const createTfQuestion = (verse: VerseRecord, index: number, versePool: VerseRecord[]): TfQuestion => {
-  const useTrue = index % 2 === 0 || versePool.length < 2;
-  if (useTrue) {
-    return {
-      kind: 'tf',
-      verse,
-      statement: generateVersePreview(verse.text),
-      isTrue: true,
-      explanation: `${verse.ref} matches the verse exactly.`,
-    };
-  }
-
-  const other = versePool[(index + 1) % versePool.length];
-  return {
-    kind: 'tf',
-    verse,
-    statement: generateVersePreview(other.text),
-    isTrue: false,
-    explanation: `That line belongs to ${other.ref}, not ${verse.ref}.`,
-  };
-};
-
-const createReferenceQuestion = (verse: VerseRecord, versePool: VerseRecord[], optionCount: number): ReferenceQuestion => {
+const createReferenceQuestion =(verse: VerseRecord, versePool: VerseRecord[], optionCount: number): ReferenceQuestion => {
   const distractorCount = Math.max(1, optionCount - 1);
   const distractors = shuffleArray(versePool.filter((item) => item.ref !== verse.ref).map((item) => item.ref)).slice(0, distractorCount);
   while (distractors.length < distractorCount) distractors.push(`John ${distractors.length + 1}:1`);
@@ -586,14 +553,12 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
     if (!versePool.length) return;
 
-    const questions: Question[] = versePool.map((verse, index) => {
+    const questions: Question[] = versePool.map((verse) => {
       switch (mode) {
         case 'blanks':
           return createBlankedQuestion(verse, cfg.blanks);
         case 'builder':
           return createBuilderQuestion(verse, cfg.wordsPerChunk);
-        case 'tf':
-          return createTfQuestion(verse, index, versePool);
         case 'reference':
           return createReferenceQuestion(verse, versePool, cfg.refOptions);
       }
@@ -875,7 +840,6 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
                 <div className="grid grid-cols-2 gap-3">
                   <button onClick={() => selectMode('blanks')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-gold-500/40"><BookOpen className="text-gold-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
                   <button onClick={() => selectMode('builder')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-gold-500/40"><Layers className="text-gold-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
-                  <button onClick={() => selectMode('tf')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
                   <button onClick={() => selectMode('reference')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
                 </div>
               </div>
@@ -938,18 +902,6 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
                     return `${guessedWord ?? word} `;
                   })}</div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{currentBlankOptions.map((opt, i) => <button key={`${opt}-${i}`} onClick={() => handleBlankChoice(opt)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>)}</div>
-                </div>
-              </div>
-            )}
-
-            {currentQuestion.kind === 'tf' && (
-              <div className="w-full max-w-lg bg-neutral-900 p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
-                <div className="mb-6"><span className="text-green-400 font-mono text-xs uppercase tracking-widest bg-green-950/30 px-3 py-1 rounded-full border border-green-900/50">{currentQuestion.verse.ref}</span></div>
-                <h3 className="text-2xl font-serif text-white mb-8 min-h-[100px] flex items-center justify-center">“{currentQuestion.statement}”</h3>
-                {feedback && <div className={`mb-6 p-4 rounded-xl text-sm ${feedback === 'correct' ? 'bg-green-900/30 text-green-200' : 'bg-red-900/30 text-red-200'}`}>{feedback === 'correct' ? 'Correct!' : 'Incorrect!'} {feedback === 'incorrect' && currentQuestion.explanation}</div>}
-                <div className="grid grid-cols-2 gap-4">
-                  <button onClick={() => handleAnswer(currentQuestion.isTrue)} disabled={feedback !== null} className="p-6 rounded-2xl border-2 flex flex-col items-center gap-2 bg-neutral-800 border-neutral-700 hover:border-green-400"><CheckCircle className="w-8 h-8 text-green-400" /><span className="font-bold text-white">TRUE</span></button>
-                  <button onClick={() => handleAnswer(!currentQuestion.isTrue)} disabled={feedback !== null} className="p-6 rounded-2xl border-2 flex flex-col items-center gap-2 bg-neutral-800 border-neutral-700 hover:border-red-400"><XCircle className="w-8 h-8 text-red-400" /><span className="font-bold text-white">FALSE</span></button>
                 </div>
               </div>
             )}

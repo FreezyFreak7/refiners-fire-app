@@ -34,17 +34,4 @@ export const gameData = {
   millennium: { blanks: [{verse:"20:2",textBefore:"Bound for a",blank:"thousand",textAfter:"years.",options:["thousand","hundred","million","ten"]}], tf: [], builder: [] },
   new_jerusalem: { blanks: [{verse:"21:21",textBefore:"The twelve gates were twelve",blank:"pearls",textAfter:".",options:["pearls","emeralds","rubies","diamonds"]}], tf: [], builder: [] },
   river: { blanks: [{verse:"22:20",textBefore:"I am coming",blank:"soon",textAfter:".",options:["soon","quickly","now","later"]}], tf: [], builder: [] },
-  // Master
-  deep_theology: {
-    blanks: [
-      { verse: "General", textBefore: "The number 144,000 is a multiple of", blank: "12", textAfter: ", symbolizing completion.", options: ["12", "7", "10", "3"] },
-    ],
-    tf: [], builder: []
-  },
-  greek_roots: {
-    blanks: [
-      { verse: "Greek", textBefore: "The Greek word for 'witness' is", blank: "martys", textAfter: ".", options: ["angelos", "martys", "logos", "kratos"] },
-    ],
-    tf: [], builder: []
-  }
 };

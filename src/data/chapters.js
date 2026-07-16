@@ -27,6 +27,4 @@ export const chapters = [
   { id: 'millennium', actId: 'new_creation', title: 'Millennium', ref: 'Rev 20', desc: 'Satan Bound' },
   { id: 'new_jerusalem', actId: 'new_creation', title: 'New Jerusalem', ref: 'Rev 21', desc: 'The Holy City' },
   { id: 'river', actId: 'new_creation', title: 'The River', ref: 'Rev 22', desc: 'Tree of Life' },
-  { id: 'deep_theology', actId: 'master_lib', title: 'Deep Theology', ref: 'General', desc: 'Symbolic Numbers' },
-  { id: 'greek_roots', actId: 'master_lib', title: 'Greek Roots', ref: 'Greek', desc: 'Original Language' },
 ];

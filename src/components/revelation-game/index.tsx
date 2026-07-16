@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Flame, Award, BookOpen, Layers, CheckCircle, XCircle, Home, Scroll, Mail, Megaphone, Droplet, Scale, Sun, Sword, Search, Users, Radio, Trophy, ArrowRight, ArrowLeft, Key, ChevronRight, AlertTriangle } from 'lucide-react';
+import { Flame, Award, BookOpen, Layers, Home, Scroll, Mail, Megaphone, Droplet, Scale, Sun, Sword, Search, Users, Radio, Trophy, ArrowRight, ArrowLeft, Key, ChevronRight, AlertTriangle } from 'lucide-react';
 import { doc, setDoc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 
 import { db } from '../../utils/firebase';
@@ -30,18 +30,28 @@ const MP_BASE_POINTS = 50;
 const MP_SPEED_BONUS = 50;
 const MP_MAX_VERSES = 50;
 
+/**
+ * Only questions tied to an explicit chapter:verse reference are used. Anything without one is
+ * interpretive rather than something Scripture states outright (e.g. "seven symbolizes
+ * completeness"), and this game only asks what the text actually says.
+ */
+const isVerseQuestion = (q: { verse?: unknown }) =>
+  typeof q?.verse === 'string' && /^\d+:\d+/.test(q.verse);
+
+const verseBlanks = (key: string) => (gameData[key]?.blanks || []).filter(isVerseQuestion);
+
 // Total fill-blank questions available across every chapter — used to cap the verse slider.
-const MP_TOTAL_AVAILABLE = Object.keys(gameData).reduce((sum, key) => sum + ((gameData[key]?.blanks || []).length), 0);
+const MP_TOTAL_AVAILABLE = Object.keys(gameData).reduce((sum, key) => sum + verseBlanks(key).length, 0);
 
 // Build the shared question list for an online round. The selected chapter's verses come
 // first, then verses from other chapters fill up to `count`. Options are pre-shuffled here so
 // every player renders the identical set in the identical order (the host writes this to the
 // session and all clients read it back).
 const buildMpQuestionPool = (chapterId: string, count: number) => {
-  const primary = gameData[chapterId]?.blanks || [];
+  const primary = verseBlanks(chapterId);
   const others = Object.keys(gameData)
     .filter((key) => key !== chapterId)
-    .flatMap((key) => gameData[key]?.blanks || []);
+    .flatMap((key) => verseBlanks(key));
   const target = Math.max(1, Math.min(count, MP_TOTAL_AVAILABLE));
   const combined = [...primary, ...shuffleArray(others)].slice(0, target);
   return shuffleArray(
@@ -52,7 +62,6 @@ const buildMpQuestionPool = (chapterId: string, count: number) => {
 const modeLabels: Record<string, string> = {
   blanks: 'Fill Blanks',
   builder: 'Builder',
-  tf: 'True or Lie',
   guess_verse: 'Reference',
 };
 
@@ -86,8 +95,8 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   >(initialAppState);
   const [selectedAct, setSelectedAct] = useState<any>(null);
   const [selectedChapter, setSelectedChapter] = useState<any>(null);
-  const [gameMode, setGameMode] = useState<'blanks' | 'builder' | 'tf' | 'guess_verse' | null>(null);
-  const [pendingMode, setPendingMode] = useState<'blanks' | 'builder' | 'tf' | 'guess_verse' | null>(null);
+  const [gameMode, setGameMode] = useState<'blanks' | 'builder' | 'guess_verse' | null>(null);
+  const [pendingMode, setPendingMode] = useState<'blanks' | 'builder' | 'guess_verse' | null>(null);
   const [gameDifficulty, setGameDifficulty] = useState<Difficulty>('normal');
   
   // Single Player State
@@ -310,17 +319,17 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     setAppState('playing');
     setFeedback(null);
 
-    const churchData = gameData[selectedChapter.id] || { blanks: [], tf: [], builder: [] };
+    const churchData = gameData[selectedChapter.id] || { blanks: [], builder: [] };
 
-    const safeBlanks = churchData.blanks.length ? churchData.blanks : [{ verse: "?", textBefore: "No data", blank: "...", textAfter: ".", options: ["..."] }];
-    const safeTF = churchData.tf && churchData.tf.length ? churchData.tf : [{ verse: "?", text: "No data", isTrue: true, explanation: "" }];
+    // Only verse-anchored questions; see isVerseQuestion.
+    const chapterBlanks = (churchData.blanks || []).filter(isVerseQuestion);
+    const safeBlanks = chapterBlanks.length ? chapterBlanks : [{ verse: "?", textBefore: "No data", blank: "...", textAfter: ".", options: ["..."] }];
     const safeBuilder = churchData.builder && churchData.builder.length ? churchData.builder : [{ verse: "?", chunks: ["No", "data"] }];
 
     if (mode === 'blanks') setActiveQuestions(shuffleArray(safeBlanks.map((q: any) => {
       const distractors = shuffleArray((q.options || []).filter((opt: any) => opt !== q.blank)).slice(0, Math.max(1, optionCount - 1));
       return { ...q, options: shuffleArray([q.blank, ...distractors]) };
     })));
-    else if (mode === 'tf') setActiveQuestions(shuffleArray([...safeTF]));
     else if (mode === 'builder') { setActiveQuestions([...safeBuilder]); initializeBuilderLevel(0, safeBuilder); }
     else if (mode === 'guess_verse') setActiveQuestions(shuffleArray(safeBlanks.map((q: any) => {
       const decoys = shuffleArray(["1:1", "2:2", "3:3", "4:4", "5:5", "6:6"].filter((d) => d !== q.verse)).slice(0, Math.max(1, optionCount - 1));
@@ -604,7 +613,6 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 <div className="grid grid-cols-2 gap-3">
                   <button onClick={() => selectMode('blanks')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-gold-500/40"><BookOpen className="text-gold-400 mb-2" size={24} /><h3 className="font-black text-white">Fill Blanks</h3></button>
                   <button onClick={() => selectMode('builder')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-gold-500/40"><Layers className="text-gold-400 mb-2" size={24} /><h3 className="font-black text-white">Builder</h3></button>
-                  <button onClick={() => selectMode('tf')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-green-500/40"><CheckCircle className="text-green-400 mb-2" size={24} /><h3 className="font-black text-white">True or Lie</h3></button>
                   <button onClick={() => selectMode('guess_verse')} className="col-span-2 sm:col-span-1 group relative bg-soot-900/50 hover:bg-iron-800/40 border border-iron-800 p-4 rounded-2xl text-left transition-all hover:border-purple-500/40"><Search className="text-purple-400 mb-2" size={24} /><h3 className="font-black text-white">Reference</h3></button>
                 </div>
               </div>
@@ -653,17 +661,6 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                     <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">{activeQuestions[currentLevel].textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold ${feedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : feedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-gold-500/50 text-transparent min-w-[80px]'}`}>{feedback === 'correct' || feedback === 'incorrect' ? activeQuestions[currentLevel].blank : '_____'}</span> {activeQuestions[currentLevel].textAfter}</div>
                     {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: any, i: any) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].blank)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>))}</div>
-                  </div>
-                </div>
-              )}
-              {gameMode === 'tf' && (
-                <div className="w-full max-w-lg bg-neutral-900 p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
-                  <div className="mb-6"><span className="text-green-400 font-mono text-xs uppercase tracking-widest bg-green-950/30 px-3 py-1 rounded-full border border-green-900/50">Rev {activeQuestions[currentLevel].verse}</span></div>
-                  <h3 className="text-2xl font-serif text-white mb-8 min-h-[100px] flex items-center justify-center">"{activeQuestions[currentLevel].text}"</h3>
-                  {feedback && (<div className={`mb-6 rounded-2xl border p-4 text-sm ${feedback === 'correct' ? 'border-green-500/30 bg-green-900/20 text-green-200' : 'border-red-500/30 bg-red-900/20 text-red-200'}`}><div className="mb-1 text-xs font-black uppercase tracking-[0.25em]">{feedback === 'correct' ? 'Correct' : 'Wrong'}</div>{feedback === 'incorrect' && activeQuestions[currentLevel].explanation}</div>)}
-                  <div className="grid grid-cols-2 gap-4">
-                    <button onClick={() => handleSinglePlayerAnswer(true)} disabled={feedback !== null} className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 ${feedback === 'correct' && activeQuestions[currentLevel].isTrue ? 'bg-green-600 border-green-500' : 'bg-neutral-800 border-neutral-700 hover:border-green-400'}`}><CheckCircle className="w-8 h-8 text-green-400" /><span className="font-bold text-white">TRUE</span></button>
-                    <button onClick={() => handleSinglePlayerAnswer(false)} disabled={feedback !== null} className={`p-6 rounded-2xl border-2 flex flex-col items-center gap-2 ${feedback === 'correct' && !activeQuestions[currentLevel].isTrue ? 'bg-red-600 border-red-500' : 'bg-neutral-800 border-neutral-700 hover:border-red-400'}`}><XCircle className="w-8 h-8 text-red-400" /><span className="font-bold text-white">FALSE</span></button>
                   </div>
                 </div>
               )}
