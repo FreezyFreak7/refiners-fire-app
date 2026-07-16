@@ -4,6 +4,7 @@ import { doc, setDoc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 
 import { db } from '../../utils/firebase';
 import { APP_ID } from '../../utils/appConfig';
+import { subscribeQuizzes, validateQuiz, type Quiz, type QuizQuestion } from '../../utils/quiz';
 import { expandedGameData as gameData } from '../../data/expandedGameDataSource';
 import { acts } from '../../data/acts';
 import { chapters } from '../../data/chapters';
@@ -58,6 +59,29 @@ const buildMpQuestionPool = (chapterId: string, count: number) => {
     combined.map((q: any) => ({ ...q, options: shuffleArray([q.blank, ...((q.options || []).filter((opt: any) => opt !== q.blank))]) }))
   );
 };
+
+/**
+ * Converts a player's custom quiz into the room's question shape. Both verse blanks and quiz
+ * questions carry `blank` = the correct answer string, so mpSubmitAnswer, the timer and the speed
+ * bonus all work on either without branching. `kind` only drives how the question renders.
+ *
+ * The questions are copied into the session doc at start: players can't read the host's private
+ * quiz, and embedding them guarantees everyone sees the identical set in the identical order.
+ */
+const quizToRoomQuestions = (quiz: Quiz) =>
+  shuffleArray(quiz.questions).map((q: QuizQuestion) => {
+    const base = {
+      kind: 'choice',
+      prompt: q.prompt,
+      verse: q.reference || '',
+      explanation: q.explanation || '',
+    };
+    if (q.kind === 'mc') {
+      const answer = q.options[q.correctIndex];
+      return { ...base, options: shuffleArray(q.options.filter((o) => o.trim())), blank: answer };
+    }
+    return { ...base, options: ['True', 'False'], blank: q.isTrue ? 'True' : 'False' };
+  });
 
 const modeLabels: Record<string, string> = {
   blanks: 'Fill Blanks',
@@ -124,6 +148,17 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const [mpLastGain, setMpLastGain] = useState(0);
   const [mpVerseCount, setMpVerseCount] = useState(10);
   const mpAnsweredRef = useRef(false);
+
+  // The host's own quizzes, so they can run one as the room's round.
+  const [myQuizzes, setMyQuizzes] = useState<Quiz[]>([]);
+  useEffect(() => {
+    if (!isMember || !user?.uid) return;
+    const unsub = subscribeQuizzes(user.uid, setMyQuizzes, () => {});
+    return () => unsub();
+  }, [isMember, user?.uid]);
+
+  // Only quizzes that are actually playable can be hosted.
+  const hostableQuizzes = myQuizzes.filter((q) => validateQuiz(q) === null);
 
   const mpSpeedKey: SpeedKey = (roomData?.speed as SpeedKey) || 'fast';
   const mpDurationMs = SPEED_SETTINGS[mpSpeedKey].seconds * 1000;
@@ -227,8 +262,35 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const mpStartGame = async () => {
     if (!roomData) return;
     const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
-    const questions = buildMpQuestionPool(roomData.chapterId || 'rev1', roomData.verseCount || mpVerseCount);
+
+    let questions;
+    if (roomData.roundType === 'quiz') {
+      const quiz = hostableQuizzes.find((q) => q.id === roomData.quizId);
+      if (!quiz) return alert('Pick a quiz to play first.');
+      questions = quizToRoomQuestions(quiz);
+    } else {
+      questions = buildMpQuestionPool(roomData.chapterId || 'rev1', roomData.verseCount || mpVerseCount);
+    }
+    if (!questions.length) return alert('That round has no questions.');
+
     await updateDoc(sessionRef, { status: 'playing', questionIndex: 0, totalQuestions: questions.length, questions });
+  };
+
+  const mpSelectRoundType = async (roundType: 'verses' | 'quiz') => {
+    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    // Default to the first playable quiz so "Start" is never a dead end.
+    const patch: Record<string, unknown> = { roundType };
+    if (roundType === 'quiz' && !roomData?.quizId && hostableQuizzes[0]) {
+      patch.quizId = hostableQuizzes[0].id;
+      patch.quizName = hostableQuizzes[0].name;
+    }
+    await updateDoc(sessionRef, patch);
+  };
+
+  const mpSelectQuiz = async (quizId: string) => {
+    const quiz = hostableQuizzes.find((q) => q.id === quizId);
+    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    await updateDoc(sessionRef, { quizId, quizName: quiz?.name ?? '' });
   };
 
   const mpSelectVerseCount = async (count: number) => {
@@ -420,7 +482,33 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
           <div className="rounded-[1.75rem] border border-iron-800/60 bg-gradient-to-b from-gold-700/12 via-soot-950/50 to-soot-900/80 p-8 space-y-6">
             <div className="bg-soot-900/70 p-4 rounded-2xl inline-block border border-gold-500/30"><div className="text-xs text-gold-400 font-mono">ROOM CODE</div><div className="text-4xl font-black text-white tracking-widest">{roomCode}</div></div>
             <div className="space-y-2"><h3 className="text-ash-500 text-sm uppercase tracking-widest">Players Joined</h3><div className="flex flex-wrap gap-2 justify-center">{(Object.values(roomData.players || {}) as any[]).map((p: any, i: any) => (<span key={i} className="px-3 py-1 rounded-full border border-iron-800 bg-soot-900/50 text-white text-sm">{p.name}</span>))}</div></div>
-            {isHost ? (<div className="space-y-4"><div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4"><label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div>
+            {isHost ? (<div className="space-y-4">
+              {/* What the room plays: Revelation verses, or one of the host's own quizzes. */}
+              {hostableQuizzes.length > 0 && (
+                <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
+                  <label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Round</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {([['verses', 'Verses'], ['quiz', 'My Quiz']] as const).map(([key, label]) => {
+                      const active = (roomData.roundType || 'verses') === key;
+                      return (
+                        <button key={key} type="button" onClick={() => mpSelectRoundType(key)} className={`rounded-xl border p-3 text-sm font-black uppercase tracking-[0.15em] transition-all ${active ? 'border-gold-500/60 bg-gold-500/15 text-gold-300' : 'border-iron-800 bg-soot-900/50 text-ash-300 hover:border-gold-500/30'}`}>{label}</button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {roomData.roundType === 'quiz' ? (
+                <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
+                  <label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Select Quiz</label>
+                  <select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectQuiz(e.target.value)} value={roomData.quizId || ''}>
+                    {hostableQuizzes.map((q) => <option key={q.id} value={q.id}>{q.name} ({q.questions.length})</option>)}
+                  </select>
+                  <div className="mt-2 text-[11px] text-ash-600">Your quiz is shared with everyone in the room for this round.</div>
+                </div>
+              ) : (
+                <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4"><label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div>
+              )}
               <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
                 <label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Answer Speed</label>
                 <div className="grid grid-cols-3 gap-2">
@@ -436,7 +524,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 </div>
                 <div className="mt-2 text-[11px] text-ash-600">Answer faster to earn more points — up to {MP_BASE_POINTS + MP_SPEED_BONUS} per question.</div>
               </div>
-              <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
+              <div className={`text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4 ${roomData.roundType === 'quiz' ? 'hidden' : ''}`}>
                 <div className="mb-2 flex items-center justify-between">
                   <label className="text-xs text-ash-500 uppercase tracking-[0.2em]">Verses to Play</label>
                   <span className="rounded-lg border border-gold-500/30 bg-gold-700/15 px-3 py-1 text-sm font-black text-gold-300">{mpVerseCount}</span>
@@ -454,7 +542,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 />
                 <div className="mt-1 flex justify-between text-[10px] text-ash-600"><span>1</span><span>{MP_MAX_VERSES}</span></div>
               </div>
-              <button onClick={mpStartGame} className="btn-primary w-full rounded-2xl py-4 font-black uppercase tracking-[0.2em]">Start Game</button></div>) : (<div className="space-y-3"><div className="flex items-center justify-center gap-2 text-gold-400 animate-pulse"><Radio size={16} /> Waiting for Host...</div><div className="text-xs text-ash-600 uppercase tracking-[0.2em]">Speed: {SPEED_SETTINGS[(roomData.speed as SpeedKey) || 'fast'].label} · {roomData.verseCount || 10} verses</div></div>)}
+              <button onClick={mpStartGame} className="btn-primary w-full rounded-2xl py-4 font-black uppercase tracking-[0.2em]">Start Game</button></div>) : (<div className="space-y-3"><div className="flex items-center justify-center gap-2 text-gold-400 animate-pulse"><Radio size={16} /> Waiting for Host...</div><div className="text-xs text-ash-600 uppercase tracking-[0.2em]">Speed: {SPEED_SETTINGS[(roomData.speed as SpeedKey) || 'fast'].label} · {roomData.roundType === 'quiz' ? (roomData.quizName || 'Custom quiz') : `${roomData.verseCount || 10} verses`}</div></div>)}
           </div>
         </div>
       );
@@ -481,8 +569,16 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
               </div>
             );
           })()}
-          <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">{currentQ.textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold transition-all ${mpFeedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : mpFeedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-gold-500/50 text-transparent min-w-[80px]'}`}>{mpFeedback ? currentQ.blank : '_____'}</span> {currentQ.textAfter}</div>
+          {currentQ.kind === 'choice' ? (
+            <div className="mb-10">
+              {currentQ.verse && <div className="mb-3 text-sm font-black uppercase tracking-widest text-gold-400">{currentQ.verse}</div>}
+              <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed">{currentQ.prompt}</div>
+            </div>
+          ) : (
+            <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">{currentQ.textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold transition-all ${mpFeedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : mpFeedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-gold-500/50 text-transparent min-w-[80px]'}`}>{mpFeedback ? currentQ.blank : '_____'}</span> {currentQ.textAfter}</div>
+          )}
           {mpFeedback && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${mpFeedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{mpFeedback === 'correct' ? `Correct +${mpLastGain}` : 'Wrong'}</div>}
+          {mpFeedback && currentQ.explanation && <div className="mb-6 text-sm text-ash-400">{currentQ.explanation}</div>}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">{(currentQ.options || []).map((opt: any, i: any) => (<button key={i} onClick={() => mpSubmitAnswer(opt)} disabled={mpFeedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${mpFeedback === 'correct' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white' : mpFeedback === 'incorrect' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>))}</div>
           <div className="border-t border-neutral-700 pt-4"><h4 className="text-xs text-ash-600 uppercase tracking-widest mb-2">Live Scores</h4><div className="flex flex-wrap gap-4 justify-center">{(Object.entries(roomData.players || {}) as any[]).sort((a: any, b: any) => (b?.[1]?.score || 0) - (a?.[1]?.score || 0)).map(([pid, p]: any, i: any) => (<div key={pid} className={`flex items-center gap-2 text-sm ${pid === user.uid ? 'text-gold-400 font-bold' : 'text-ash-500'}`}><span>#{i+1} {p.name}</span><span className="bg-neutral-950 px-2 py-0.5 rounded">{p.score}</span></div>))}</div></div>
         </div>
