@@ -12,6 +12,7 @@ import {
   Search,
 } from 'lucide-react';
 import { loadBible, type BibleData } from '../../utils/bible';
+import { sectionsFor, type LibrarySection } from '../../data/libraries';
 
 interface MemoryGameProps {
   onBack: () => void;
@@ -32,7 +33,7 @@ type CustomCollection = {
 
 type VerseLookupResult = { ref: string; text: string };
 type GameMode = 'blanks' | 'builder' | 'reference';
-type AppState = 'library' | 'menu' | 'difficulty' | 'playing' | 'finished';
+type AppState = 'library' | 'sectionSelect' | 'bookSelect' | 'menu' | 'difficulty' | 'playing' | 'finished';
 
 type BlanksQuestion = {
   kind: 'blanks';
@@ -353,8 +354,14 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
   const [showAllVerses, setShowAllVerses] = useState(false);
   const customRefInputRef = useRef<HTMLInputElement | null>(null);
 
-  const [appState, setAppState] = useState<AppState>('menu');
+  // Sectioned libraries open on their section list; the rest go straight to mode selection.
+  const [appState, setAppState] = useState<AppState>(sectionsFor(initialSetId) ? 'sectionSelect' : 'menu');
   const [activeSetId, setActiveSetId] = useState<string>(initialSetId);
+
+  // The chosen slice of Scripture: a section, and optionally one book inside it. `null` book means
+  // the whole section. Both null for libraries with no sections (e.g. Alpha & Omega).
+  const [selectedSection, setSelectedSection] = useState<LibrarySection | null>(null);
+  const [selectedBook, setSelectedBook] = useState<string | null>(null);
   const [activeMode, setActiveMode] = useState<GameMode | null>(null);
   const [pendingMode, setPendingMode] = useState<GameMode | null>(null);
   const [activeDifficulty, setActiveDifficulty] = useState<Difficulty>('normal');
@@ -485,6 +492,33 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
   const activeSet = sets.find((set) => set.id === activeSetId) ?? sets[0];
   const activeCustomCollection = customCollections.find((collection) => collection.id === activeCustomCollectionId) ?? null;
 
+  const activeSections = sectionsFor(activeSetId);
+
+  // What a round actually draws from: a single book, a section, or the whole library.
+  const activeBooks = selectedBook
+    ? [selectedBook]
+    : selectedSection
+      ? selectedSection.books
+      : activeSet.books;
+
+  // What to call it on the mode screen.
+  const activeScopeTitle = selectedBook ?? selectedSection?.title ?? activeSet.title;
+  const activeScopeRange = selectedBook
+    ? `${selectedSection?.title ?? ''}`
+    : selectedSection?.range ?? activeSet.subtitle;
+
+  const openSection = (section: LibrarySection) => {
+    setSelectedSection(section);
+    // A one-book section has nothing to choose — go straight to the modes.
+    if (section.books.length === 1) {
+      setSelectedBook(section.books[0]);
+      setAppState('menu');
+    } else {
+      setSelectedBook(null);
+      setAppState('bookSelect');
+    }
+  };
+
   const createNamedCollection = () => {
     const title = newCollectionName.trim();
     if (!title) {
@@ -544,10 +578,11 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     if (!activeSet) return;
     const cfg = difficultyConfig[difficulty];
 
-    // Random libraries pull a fresh draw from Scripture each round; custom collections use their saved verses.
+    // Random libraries pull a fresh draw from Scripture each round, narrowed to the chosen book or
+    // section; custom collections use their saved verses.
     const versePool = activeSet.random
       ? bibleData
-        ? sampleRandomVerses(bibleData, activeSet.books, 10, cfg.minWords, cfg.maxWords)
+        ? sampleRandomVerses(bibleData, activeBooks, 10, cfg.minWords, cfg.maxWords)
         : []
       : shuffleArray(activeSet.verses).slice(0, Math.min(activeSet.verses.length, 12));
 
@@ -771,7 +806,10 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
                         onClick={() => {
                           setActiveSetId(set.id);
                           if (set.isCustom) setActiveCustomCollectionId(set.id);
-                          setAppState('menu');
+                          // Switching library resets the slice, and sectioned ones start there.
+                          setSelectedSection(null);
+                          setSelectedBook(null);
+                          setAppState(sectionsFor(set.id) ? 'sectionSelect' : 'menu');
                         }}
                         className={`group rounded-2xl border p-3 text-left transition-all ${active ? 'border-gold-500/60 bg-gold-500/10' : 'border-iron-800/60 bg-soot-900/30 hover:border-gold-500/30 hover:bg-iron-800/40'}`}
                       >
@@ -799,15 +837,88 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
           </div>
         )}
 
-        {appState === 'menu' && activeSet && (
+        {/* Section select — the library broken into smaller, studiable parts. */}
+        {appState === 'sectionSelect' && activeSections && (
           <div className="w-full space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
             <button onClick={onBack} className="inline-flex items-center gap-2 mb-4 rounded-full border border-iron-800 bg-soot-900/50 px-4 py-2 text-sm font-black text-ash-200 transition-colors hover:bg-iron-800/40 hover:border-gold-500/30">
               <ChevronRight className="rotate-180 text-gold-400" size={16} /> Back to Main Menu
             </button>
 
             <div className="text-center space-y-2 mb-8">
-              <h2 className="text-4xl font-black text-white tracking-tight uppercase">{activeSet.title}</h2>
-              <p className="text-gold-400 font-mono tracking-widest text-xs uppercase">{activeSet.subtitle}</p>
+              <h2 className="struck text-4xl">{activeSet.title}</h2>
+              <p className="text-sm text-ash-500">Choose a part to study.</p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              {activeSections.map((section) => (
+                <button
+                  key={section.id}
+                  onClick={() => openSection(section)}
+                  className="group rounded-2xl border border-iron-800 bg-soot-900/50 p-5 text-left transition-all hover:-translate-y-0.5 hover:border-gold-500/40 hover:bg-iron-800/40"
+                >
+                  <div className="mb-1 font-display text-xl font-semibold uppercase tracking-forge text-ash-200">{section.title}</div>
+                  <div className="text-xs font-black uppercase tracking-widest text-gold-400">{section.range}</div>
+                  <div className="mt-2 text-sm text-ash-500">{section.desc}</div>
+                  <div className="mt-3 text-xs text-ash-600">
+                    {section.books.length === 1 ? '1 book' : `${section.books.length} books`}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Book select — within a section. "Whole section" keeps the wider draw available. */}
+        {appState === 'bookSelect' && selectedSection && (
+          <div className="w-full space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
+            <button onClick={() => setAppState('sectionSelect')} className="inline-flex items-center gap-2 mb-4 rounded-full border border-iron-800 bg-soot-900/50 px-4 py-2 text-sm font-black text-ash-200 transition-colors hover:bg-iron-800/40 hover:border-gold-500/30">
+              <ChevronRight className="rotate-180 text-gold-400" size={16} /> {activeSet.title}
+            </button>
+
+            <div className="text-center space-y-2 mb-8">
+              <h2 className="struck text-4xl">{selectedSection.title}</h2>
+              <p className="text-xs font-black uppercase tracking-widest text-gold-400">{selectedSection.range}</p>
+            </div>
+
+            <button
+              onClick={() => { setSelectedBook(null); setAppState('menu'); }}
+              className="mb-3 w-full rounded-2xl border border-gold-500/40 bg-gold-700/15 p-4 text-left transition-all hover:bg-gold-700/25"
+            >
+              <div className="font-display text-lg font-semibold uppercase tracking-forge text-gold-300">All of {selectedSection.title}</div>
+              <div className="text-xs text-ash-500">Draw from every book in this part</div>
+            </button>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+              {selectedSection.books.map((book) => (
+                <button
+                  key={book}
+                  onClick={() => { setSelectedBook(book); setAppState('menu'); }}
+                  className="rounded-xl border border-iron-800 bg-soot-900/50 px-4 py-4 text-left font-bold text-ash-200 transition-all hover:border-gold-500/40 hover:bg-iron-800/40"
+                >
+                  {book}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {appState === 'menu' && activeSet && (
+          <div className="w-full space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
+            <button
+              onClick={() => {
+                // Step back up the chain rather than dumping the player at the main menu.
+                if (!activeSections) return onBack();
+                if (selectedSection && selectedSection.books.length > 1) return setAppState('bookSelect');
+                setAppState('sectionSelect');
+              }}
+              className="inline-flex items-center gap-2 mb-4 rounded-full border border-iron-800 bg-soot-900/50 px-4 py-2 text-sm font-black text-ash-200 transition-colors hover:bg-iron-800/40 hover:border-gold-500/30"
+            >
+              <ChevronRight className="rotate-180 text-gold-400" size={16} /> {activeSections ? 'Back' : 'Back to Main Menu'}
+            </button>
+
+            <div className="text-center space-y-2 mb-8">
+              <h2 className="text-4xl font-black text-white tracking-tight uppercase">{activeScopeTitle}</h2>
+              <p className="text-gold-400 font-mono tracking-widest text-xs uppercase">{activeScopeRange}</p>
               {activeSet.random ? (
                 <p className="text-ash-600 text-sm mt-2">Verses are drawn at random each round for fresh practice.</p>
               ) : (
