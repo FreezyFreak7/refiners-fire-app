@@ -70,10 +70,11 @@ const buildMpQuestionPool = (chapterId: string, count: number) => {
  */
 const quizToRoomQuestions = (quiz: Quiz) =>
   shuffleArray(quiz.questions).flatMap((q: QuizQuestion) => {
-    // The room only supports pick-an-option answering, so verse-builder (reorder) and type-the-word
-    // (free text) questions are left out of a hosted round. If that leaves nothing, the "no
-    // questions" guard in mpStartGame catches it.
+    // The room only supports pick-an-option answering. Verse-builder (reorder), type-the-word
+    // (free text) and multi-blank fill-blanks don't fit, so they're left out of a hosted round; if
+    // that leaves nothing, the "no questions" guard in mpStartGame catches it.
     if (q.kind === 'builder' || q.kind === 'type') return [];
+    if (q.kind === 'blanks' && q.blankIndexes.length !== 1) return [];
 
     const base = {
       kind: 'choice',
@@ -81,8 +82,11 @@ const quizToRoomQuestions = (quiz: Quiz) =>
       verse: q.reference || '',
       explanation: q.explanation || '',
     };
-    if (q.kind === 'mc' || q.kind === 'blanks') {
+    if (q.kind === 'mc') {
       return [{ ...base, options: shuffleArray(q.options.filter((o) => o.trim())), blank: q.options[q.correctIndex] }];
+    }
+    if (q.kind === 'blanks') {
+      return [{ ...base, options: shuffleArray(q.options), blank: q.answers[0] }];
     }
     return [{ ...base, options: ['True', 'False'], blank: q.isTrue ? 'True' : 'False' }];
   });

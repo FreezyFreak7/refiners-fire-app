@@ -5,7 +5,7 @@
  */
 
 import { formatRef, type Verse } from './bible';
-import { buildQuestion, cleanWordAt, promptWithBlank, type Candidate } from './questionGen';
+import { cleanWordAt, shuffle } from './questionGen';
 
 export type QuizQuestionKind = 'mc' | 'tf' | 'blanks' | 'builder' | 'type';
 
@@ -29,23 +29,26 @@ export interface TrueFalseQuestion extends QuizQuestionBase {
 }
 
 /**
- * Generated from a verse: the verse with one chosen word blanked, plus options. `verseText` and
- * `blankIndex` are kept so the author can re-choose which word is blanked later.
+ * Generated from a verse: the verse with one or more chosen words blanked, plus a word bank.
+ * `verseText` + `blankIndexes` are kept so the author can add/remove blanks later.
  */
 export interface FillBlanksQuestion extends QuizQuestionBase {
   kind: 'blanks';
   verseText: string;
-  blankIndex: number;
+  /** Word indexes that are blanked, ascending. */
+  blankIndexes: number[];
+  /** The blanked words, in blank order. */
+  answers: string[];
+  /** The word bank: answers plus distractors, shuffled. */
   options: string[];
-  correctIndex: number;
 }
 
-/** Like fill-blanks, but the player types the missing word instead of choosing from options. */
+/** Like fill-blanks, but the player types the missing words instead of choosing from a bank. */
 export interface TypedBlankQuestion extends QuizQuestionBase {
   kind: 'type';
   verseText: string;
-  blankIndex: number;
-  answer: string;
+  blankIndexes: number[];
+  answers: string[];
 }
 
 /** Generated from a verse: ordered chunks the player reassembles. */
@@ -102,60 +105,101 @@ export function matchesTypedAnswer(input: string, answer: string): boolean {
   return norm(input) === norm(answer) && norm(input).length > 0;
 }
 
-/**
- * Builds a fill-blanks question from a verse. `wordIndex` chooses which word to blank; omit it to
- * auto-pick a good one. Returns null if the chosen word can't be blanked.
- */
-export function blanksFromVerse(verse: Verse, wordIndex?: number): FillBlanksQuestion | null {
+const PAD_WORDS = ['faith', 'grace', 'mercy', 'glory', 'kingdom', 'spirit', 'covenant', 'righteous', 'truth', 'light', 'word', 'world'];
+
+/** Auto-picks ~1 blank per 9 words (1–3), from decent-length non-leading words. */
+function autoBlankIndexes(words: string[]): number[] {
+  const blankable = words
+    .map((_, i) => ({ i, c: cleanWordAt(words, i) }))
+    .filter((x) => x.i > 0 && x.c.length >= 4);
+  if (!blankable.length) return [];
+  const count = Math.min(3, Math.max(1, Math.round(words.length / 9)));
+  return shuffle(blankable, Math.random).slice(0, count).map((x) => x.i).sort((a, b) => a - b);
+}
+
+const promptWithBlanks = (words: string[], indexes: number[]) => {
+  const set = new Set(indexes);
+  return words.map((w, i) => (set.has(i) ? '_____' : w)).join(' ');
+};
+
+const answersAt = (words: string[], indexes: number[]) =>
+  [...indexes].sort((a, b) => a - b).map((i) => cleanWordAt(words, i));
+
+/** Word bank: the answers plus a few distractors drawn from the verse and a fallback pool. */
+function wordBank(words: string[], answers: string[]): string[] {
+  const answerSet = new Set(answers.map((a) => a.toLowerCase()));
+  const need = Math.max(4, answers.length + 3);
+  const distractors: string[] = [];
+
+  const add = (w: string) => {
+    const lw = w.toLowerCase();
+    if (w.length >= 3 && !answerSet.has(lw) && !distractors.some((d) => d.toLowerCase() === lw)) {
+      distractors.push(w);
+    }
+  };
+  for (const w of shuffle(words.map((_, i) => cleanWordAt(words, i)), Math.random)) {
+    if (answers.length + distractors.length >= need) break;
+    add(w);
+  }
+  for (const p of shuffle([...PAD_WORDS], Math.random)) {
+    if (answers.length + distractors.length >= need) break;
+    add(p);
+  }
+  return shuffle([...answers, ...distractors], Math.random);
+}
+
+/** Builds a fill-blanks question. `indexes` chooses the blanked words; omit to auto-pick 1–3. */
+export function blanksFromVerse(verse: Verse, indexes?: number[]): FillBlanksQuestion | null {
   const words = wordsOf(verse);
-  const candidate: Candidate = { reference: formatRef(verse), words };
-  const q = buildQuestion(candidate, Math.random, wordIndex);
-  if (!q || q.correctIndex < 0) return null;
+  const idx = indexes?.length ? [...indexes].sort((a, b) => a - b) : autoBlankIndexes(words);
+  const answers = answersAt(words, idx);
+  if (!answers.length || answers.some((a) => !a)) return null;
   return {
     id: newQuestionId(),
     kind: 'blanks',
-    prompt: q.prompt,
-    reference: q.reference,
+    prompt: promptWithBlanks(words, idx),
+    reference: formatRef(verse),
     verseText: verse.text.replace(/\s+/g, ' ').trim(),
-    blankIndex: q.blankIndex,
-    options: q.options,
-    correctIndex: q.correctIndex,
+    blankIndexes: idx,
+    answers,
+    options: wordBank(words, answers),
   };
 }
 
-/** Builds a type-the-word question. `wordIndex` chooses the blank; omit to auto-pick. */
-export function typedFromVerse(verse: Verse, wordIndex?: number): TypedBlankQuestion | null {
+/** Builds a type-the-words question. `indexes` chooses the blanks; omit to auto-pick. */
+export function typedFromVerse(verse: Verse, indexes?: number[]): TypedBlankQuestion | null {
   const words = wordsOf(verse);
-  // Reuse the picker to choose a sensible default word when none is given.
-  const index = wordIndex ?? buildQuestion({ reference: '', words }, Math.random)?.blankIndex;
-  if (index === undefined) return null;
-  const answer = cleanWordAt(words, index);
-  if (!answer) return null;
+  const idx = indexes?.length ? [...indexes].sort((a, b) => a - b) : autoBlankIndexes(words);
+  const answers = answersAt(words, idx);
+  if (!answers.length || answers.some((a) => !a)) return null;
   return {
     id: newQuestionId(),
     kind: 'type',
-    prompt: promptWithBlank(words, index),
+    prompt: promptWithBlanks(words, idx),
     reference: formatRef(verse),
     verseText: verse.text.replace(/\s+/g, ' ').trim(),
-    blankIndex: index,
-    answer,
+    blankIndexes: idx,
+    answers,
   };
 }
 
-/** Re-blanks a fill-blanks question at a different word, rebuilding its options. Keeps id/explanation. */
-export function reblankAt(q: FillBlanksQuestion, wordIndex: number): FillBlanksQuestion | null {
+/** Toggles a word in/out of the blanks for a fill-blanks question. Never removes the last blank. */
+export function toggleBlanksWord(q: FillBlanksQuestion, wordIndex: number): FillBlanksQuestion {
   const words = verseWords(q.verseText);
-  const g = buildQuestion({ reference: q.reference ?? '', words }, Math.random, wordIndex);
-  if (!g || g.correctIndex < 0) return null;
-  return { ...q, prompt: g.prompt, blankIndex: wordIndex, options: g.options, correctIndex: g.correctIndex };
+  const has = q.blankIndexes.includes(wordIndex);
+  const next = (has ? q.blankIndexes.filter((i) => i !== wordIndex) : [...q.blankIndexes, wordIndex]).sort((a, b) => a - b);
+  if (!next.length) return q;
+  const answers = answersAt(words, next);
+  return { ...q, blankIndexes: next, answers, options: wordBank(words, answers), prompt: promptWithBlanks(words, next) };
 }
 
-/** Re-picks the typed word. Keeps id/explanation. */
-export function retypeAt(q: TypedBlankQuestion, wordIndex: number): TypedBlankQuestion | null {
+/** Toggles a word in/out of the blanks for a type-the-words question. Never removes the last blank. */
+export function toggleTypedWord(q: TypedBlankQuestion, wordIndex: number): TypedBlankQuestion {
   const words = verseWords(q.verseText);
-  const answer = cleanWordAt(words, wordIndex);
-  if (!answer) return null;
-  return { ...q, prompt: promptWithBlank(words, wordIndex), blankIndex: wordIndex, answer };
+  const has = q.blankIndexes.includes(wordIndex);
+  const next = (has ? q.blankIndexes.filter((i) => i !== wordIndex) : [...q.blankIndexes, wordIndex]).sort((a, b) => a - b);
+  if (!next.length) return q;
+  return { ...q, blankIndexes: next, answers: answersAt(words, next), prompt: promptWithBlanks(words, next) };
 }
 
 /** Splits a verse into ordered chunks for a builder question, or null if it's too short. */
@@ -184,11 +228,13 @@ export function validateQuestion(question: QuizQuestion): string | null {
       return question.prompt.trim() ? null : 'The question is empty.';
     case 'blanks':
       // Auto-generated, so these only fail if data was corrupted.
-      return question.options?.length >= 2 && question.options[question.correctIndex]
+      return question.answers?.length >= 1 && question.options?.length >= 2
         ? null
         : 'This fill-blanks question is incomplete.';
     case 'type':
-      return question.answer?.trim() ? null : 'This type-the-word question is incomplete.';
+      return question.answers?.length >= 1 && question.answers.every((a) => a.trim())
+        ? null
+        : 'This type-the-word question is incomplete.';
     case 'builder':
       return question.chunks?.length >= 2 ? null : 'This verse builder question is incomplete.';
   }
@@ -225,9 +271,9 @@ export function serializeQuestions(questions: QuizQuestion[]): QuizQuestion[] {
       case 'tf':
         return { ...base, kind: 'tf' as const, isTrue: q.isTrue };
       case 'blanks':
-        return { ...base, kind: 'blanks' as const, verseText: q.verseText, blankIndex: q.blankIndex, options: q.options, correctIndex: q.correctIndex };
+        return { ...base, kind: 'blanks' as const, verseText: q.verseText, blankIndexes: q.blankIndexes, answers: q.answers, options: q.options };
       case 'type':
-        return { ...base, kind: 'type' as const, verseText: q.verseText, blankIndex: q.blankIndex, answer: q.answer };
+        return { ...base, kind: 'type' as const, verseText: q.verseText, blankIndexes: q.blankIndexes, answers: q.answers };
       case 'builder':
         return { ...base, kind: 'builder' as const, chunks: q.chunks };
     }

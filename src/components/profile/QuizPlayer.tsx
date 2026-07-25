@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle } from 'lucide-react';
-import { matchesTypedAnswer, type Quiz, type QuizQuestion, type VerseBuilderQuestion } from '../../utils/quiz';
+import { matchesTypedAnswer, verseWords, type FillBlanksQuestion, type Quiz, type QuizQuestion, type TypedBlankQuestion, type VerseBuilderQuestion } from '../../utils/quiz';
 
 interface QuizPlayerProps {
   quiz: Quiz;
@@ -87,32 +87,154 @@ const VerseBuilderBoard: React.FC<{
 const isCorrect = (question: QuizQuestion, answer: Answer): boolean => {
   switch (question.kind) {
     case 'mc':
-    case 'blanks':
       return answer === question.correctIndex;
     case 'tf':
       return answer === question.isTrue;
+    case 'blanks':
     case 'type':
-      return typeof answer === 'string' && matchesTypedAnswer(answer, question.answer);
+      return (
+        Array.isArray(answer) &&
+        answer.length === question.answers.length &&
+        answer.every((w, i) => typeof w === 'string' && matchesTypedAnswer(w, question.answers[i]))
+      );
     case 'builder':
       return Array.isArray(answer) && answer.join('') === question.chunks.join('');
   }
 };
 
-/** Text-entry board for a type-the-word question, keyed so it resets per question. */
-const TypeAnswerBoard: React.FC<{ answered: boolean; onSubmit: (text: string) => void }> = ({ answered, onSubmit }) => {
-  const [text, setText] = useState('');
+/** Renders a prompt (verse with `_____` tokens) as text with a React node in place of each blank. */
+const renderWithBlanks = (prompt: string, slot: (i: number) => React.ReactNode) => {
+  const parts = prompt.split('_____');
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (text.trim() && !answered) onSubmit(text); }} className="space-y-3">
-      <input
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        disabled={answered}
-        autoFocus
-        placeholder="Type the missing word…"
-        className="w-full rounded-xl border border-iron-800 bg-soot-950/60 p-3 text-lg text-white outline-none focus:border-gold-500/60 disabled:opacity-60"
-      />
+    <span>
+      {parts.map((part, i) => (
+        <React.Fragment key={i}>
+          {part}
+          {i < parts.length - 1 && slot(i)}
+        </React.Fragment>
+      ))}
+    </span>
+  );
+};
+
+/** Word-bank board for a (multi-)fill-blanks question. Tap a bank word to fill the next blank. */
+const BlanksBoard: React.FC<{
+  question: FillBlanksQuestion;
+  answered: boolean;
+  onSubmit: (words: string[]) => void;
+}> = ({ question, answered, onSubmit }) => {
+  const blanks = question.answers.length;
+  // Each slot holds a bank index, or null. The bank is question.options.
+  const [slots, setSlots] = useState<(number | null)[]>(Array(blanks).fill(null));
+
+  const usedBank = new Set(slots.filter((s): s is number => s !== null));
+  const fillNext = (bankIdx: number) => {
+    const empty = slots.findIndex((s) => s === null);
+    if (empty === -1) return;
+    setSlots((cur) => cur.map((s, i) => (i === empty ? bankIdx : s)));
+  };
+  const clearSlot = (slotIdx: number) => setSlots((cur) => cur.map((s, i) => (i === slotIdx ? null : s)));
+
+  const allFilled = slots.every((s) => s !== null);
+  const filledWords = () => slots.map((s) => (s === null ? '' : question.options[s]));
+
+  return (
+    <div className="space-y-4">
+      <div className="text-xl font-bold leading-loose text-white">
+        {renderWithBlanks(question.prompt, (i) => {
+          const bankIdx = slots[i];
+          return (
+            <button
+              type="button"
+              disabled={answered || bankIdx === null}
+              onClick={() => clearSlot(i)}
+              className={`mx-1 inline-block min-w-[4rem] rounded border-b-2 px-2 text-center align-baseline ${
+                bankIdx === null
+                  ? 'border-gold-500/50 text-transparent'
+                  : 'border-gold-500 bg-gold-700/15 text-gold-200'
+              }`}
+            >
+              {bankIdx === null ? '···' : question.options[bankIdx]}
+            </button>
+          );
+        })}
+      </div>
+
       {!answered && (
-        <button type="submit" disabled={!text.trim()} className="btn-primary w-full rounded-xl py-3 text-sm font-black uppercase tracking-widest disabled:opacity-40">
+        <div className="flex flex-wrap gap-2">
+          {question.options.map((word, i) => (
+            <button
+              key={i}
+              type="button"
+              disabled={usedBank.has(i)}
+              onClick={() => fillNext(i)}
+              className="rounded-lg border border-iron-800 bg-soot-900/70 px-3 py-1.5 text-sm font-bold text-ash-200 transition-colors hover:border-gold-500/40 hover:bg-iron-800/40 disabled:opacity-30"
+            >
+              {word}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!answered && allFilled && (
+        <button
+          type="button"
+          onClick={() => onSubmit(filledWords())}
+          className="btn-primary w-full rounded-xl py-3 text-sm font-black uppercase tracking-widest"
+        >
+          Check answer
+        </button>
+      )}
+    </div>
+  );
+};
+
+/** Multi-input board for a type-the-words question. */
+const TypedBoard: React.FC<{
+  question: TypedBlankQuestion;
+  answered: boolean;
+  onSubmit: (words: string[]) => void;
+}> = ({ question, answered, onSubmit }) => {
+  const [inputs, setInputs] = useState<string[]>(Array(question.answers.length).fill(''));
+  const words = verseWords(question.verseText);
+
+  return (
+    <form
+      onSubmit={(e) => { e.preventDefault(); if (inputs.every((t) => t.trim()) && !answered) onSubmit(inputs); }}
+      className="space-y-3"
+    >
+      <div className="text-xl font-bold leading-loose text-white">
+        {renderWithBlanks(question.prompt, () => (
+          <span className="mx-1 inline-block min-w-[3rem] border-b-2 border-gold-500/50 align-baseline">&nbsp;</span>
+        ))}
+      </div>
+
+      <div className="space-y-2">
+        {question.blankIndexes.map((wi, i) => {
+          // A hint word before the blank helps the player know which blank this is.
+          const before = words.slice(Math.max(0, wi - 2), wi).join(' ');
+          return (
+            <div key={i} className="flex items-center gap-2">
+              <span className="w-32 shrink-0 truncate text-right text-xs text-ash-500">…{before}</span>
+              <input
+                value={inputs[i]}
+                onChange={(e) => setInputs((cur) => cur.map((t, j) => (j === i ? e.target.value : t)))}
+                disabled={answered}
+                autoFocus={i === 0}
+                placeholder={`Blank ${i + 1}`}
+                className="flex-1 rounded-xl border border-iron-800 bg-soot-950/60 p-3 text-white outline-none focus:border-gold-500/60 disabled:opacity-60"
+              />
+            </div>
+          );
+        })}
+      </div>
+
+      {!answered && (
+        <button
+          type="submit"
+          disabled={!inputs.every((t) => t.trim())}
+          className="btn-primary w-full rounded-xl py-3 text-sm font-black uppercase tracking-widest disabled:opacity-40"
+        >
           Check answer
         </button>
       )}
@@ -133,12 +255,12 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
     if (!question) return '';
     switch (question.kind) {
       case 'mc':
-      case 'blanks':
         return question.options[question.correctIndex];
       case 'tf':
         return question.isTrue ? 'True' : 'False';
+      case 'blanks':
       case 'type':
-        return question.answer;
+        return question.answers.join(', ');
       case 'builder':
         return question.chunks.join(' ');
     }
@@ -231,11 +353,14 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
       {question.reference && question.kind !== 'mc' && question.kind !== 'tf' && (
         <div className="mb-2 text-sm font-black uppercase tracking-widest text-gold-400">{question.reference}</div>
       )}
-      <div className="mb-5 text-xl font-bold leading-relaxed text-white">
-        {question.kind === 'builder' ? 'Put the verse back in order.' : question.prompt}
-      </div>
+      {(question.kind === 'mc' || question.kind === 'tf') && (
+        <div className="mb-5 text-xl font-bold leading-relaxed text-white">{question.prompt}</div>
+      )}
+      {question.kind === 'builder' && (
+        <div className="mb-5 text-xl font-bold leading-relaxed text-white">Put the verse back in order.</div>
+      )}
 
-      {(question.kind === 'mc' || question.kind === 'blanks') && (
+      {question.kind === 'mc' && (
         <div className="space-y-2">
           {question.options.map((option, i) => (
             <button
@@ -254,6 +379,10 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
             </button>
           ))}
         </div>
+      )}
+
+      {question.kind === 'blanks' && (
+        <BlanksBoard key={question.id} question={question} answered={answered} onSubmit={submit} />
       )}
 
       {question.kind === 'tf' && (
@@ -281,7 +410,7 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
       )}
 
       {question.kind === 'type' && (
-        <TypeAnswerBoard key={question.id} answered={answered} onSubmit={(t) => submit(t)} />
+        <TypedBoard key={question.id} question={question} answered={answered} onSubmit={submit} />
       )}
 
       {answered && (

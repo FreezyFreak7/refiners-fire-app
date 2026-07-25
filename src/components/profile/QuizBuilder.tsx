@@ -7,8 +7,8 @@ import {
   builderFromVerse,
   emptyQuestion,
   isBlankableWord,
-  reblankAt,
-  retypeAt,
+  toggleBlanksWord,
+  toggleTypedWord,
   typedFromVerse,
   validateQuestion,
   verseWords,
@@ -196,37 +196,39 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
     </div>
   );
 
-  // The verse, with each word tappable to choose which one is blanked.
-  const wordChooser = (verseText: string, blankIndex: number, onChoose: (i: number) => void) => (
-    <div>
-      <label className="mb-1 block text-xs font-bold uppercase tracking-widest text-ash-500">
-        Tap a word to blank it
-      </label>
-      <div className="flex flex-wrap gap-1.5 rounded-xl border border-iron-800 bg-soot-950/40 p-3 leading-relaxed">
-        {verseWords(verseText).map((word, i) => {
-          const blankable = isBlankableWord(word);
-          const chosen = i === blankIndex;
-          return (
-            <button
-              key={i}
-              type="button"
-              disabled={!blankable}
-              onClick={() => onChoose(i)}
-              className={`rounded px-1.5 py-0.5 text-sm transition-colors ${
-                chosen
-                  ? 'bg-gold-600 font-bold text-soot-950'
-                  : blankable
-                    ? 'text-ash-200 hover:bg-iron-800/60'
-                    : 'text-ash-600'
-              }`}
-            >
-              {word}
-            </button>
-          );
-        })}
+  // The verse, with each word tappable to toggle it in/out of the blanks (multiple allowed).
+  const wordChooser = (verseText: string, blankIndexes: number[], onToggle: (i: number) => void) => {
+    const chosen = new Set(blankIndexes);
+    return (
+      <div>
+        <label className="mb-1 block text-xs font-bold uppercase tracking-widest text-ash-500">
+          Tap words to blank them ({blankIndexes.length} selected)
+        </label>
+        <div className="flex flex-wrap gap-1.5 rounded-xl border border-iron-800 bg-soot-950/40 p-3 leading-relaxed">
+          {verseWords(verseText).map((word, i) => {
+            const blankable = isBlankableWord(word);
+            return (
+              <button
+                key={i}
+                type="button"
+                disabled={!blankable}
+                onClick={() => onToggle(i)}
+                className={`rounded px-1.5 py-0.5 text-sm transition-colors ${
+                  chosen.has(i)
+                    ? 'bg-gold-600 font-bold text-soot-950'
+                    : blankable
+                      ? 'text-ash-200 hover:bg-iron-800/60'
+                      : 'text-ash-600'
+                }`}
+              >
+                {word}
+              </button>
+            );
+          })}
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const changeVerseButton = (kind: 'blanks' | 'type', id: string) => (
     <button
@@ -240,25 +242,27 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
 
   const renderBlanks = (q: FillBlanksQuestion) => (
     <div className="space-y-3">
-      {wordChooser(q.verseText, q.blankIndex, (i) => {
-        const next = reblankAt(q, i);
-        if (next) update(q.id, next);
-      })}
+      {wordChooser(q.verseText, q.blankIndexes, (i) => update(q.id, toggleBlanksWord(q, i)))}
       <div className="rounded-xl border border-iron-800 bg-soot-950/40 p-3">
-        <div className="mb-2 text-xs font-bold uppercase tracking-widest text-ash-500">Options (answer highlighted)</div>
+        <div className="mb-2 text-xs font-bold uppercase tracking-widest text-ash-500">
+          Word bank (answers in green)
+        </div>
         <div className="flex flex-wrap gap-2">
-          {q.options.map((option, i) => (
-            <span
-              key={i}
-              className={`rounded-lg border px-3 py-1 text-sm font-bold ${
-                i === q.correctIndex
-                  ? 'border-green-400/60 bg-green-500/15 text-green-200'
-                  : 'border-iron-800 bg-soot-900/60 text-ash-400'
-              }`}
-            >
-              {option}
-            </span>
-          ))}
+          {q.options.map((option, i) => {
+            const isAnswer = q.answers.some((a) => a.toLowerCase() === option.toLowerCase());
+            return (
+              <span
+                key={i}
+                className={`rounded-lg border px-3 py-1 text-sm font-bold ${
+                  isAnswer
+                    ? 'border-green-400/60 bg-green-500/15 text-green-200'
+                    : 'border-iron-800 bg-soot-900/60 text-ash-400'
+                }`}
+              >
+                {option}
+              </span>
+            );
+          })}
         </div>
       </div>
       {changeVerseButton('blanks', q.id)}
@@ -267,14 +271,11 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
 
   const renderTyped = (q: TypedBlankQuestion) => (
     <div className="space-y-3">
-      {wordChooser(q.verseText, q.blankIndex, (i) => {
-        const next = retypeAt(q, i);
-        if (next) update(q.id, next);
-      })}
+      {wordChooser(q.verseText, q.blankIndexes, (i) => update(q.id, toggleTypedWord(q, i)))}
       <div className="rounded-xl border border-iron-800 bg-soot-950/40 p-3">
         <div className="text-lg text-white">{q.prompt}</div>
         <div className="mt-2 text-xs text-ash-500">
-          Players type the answer: <span className="font-bold text-green-300">{q.answer}</span>
+          Players type: <span className="font-bold text-green-300">{q.answers.join(', ')}</span>
         </div>
       </div>
       {changeVerseButton('type', q.id)}
@@ -369,7 +370,7 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
                         : q.prompt.trim() || <span className="text-ash-600">Untitled question</span>}
                     </div>
                     {q.kind === 'type' && (
-                      <div className="mt-0.5 text-xs text-ash-600">Answer: {q.answer}</div>
+                      <div className="mt-0.5 text-xs text-ash-600">Answers: {q.answers.join(', ')}</div>
                     )}
                   </button>
 
