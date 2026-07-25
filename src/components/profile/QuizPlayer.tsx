@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle } from 'lucide-react';
-import { matchesTypedAnswer, verseWords, type FillBlanksQuestion, type Quiz, type QuizQuestion, type TypedBlankQuestion, type VerseBuilderQuestion } from '../../utils/quiz';
+import { matchesTypedAnswer, type FillBlanksQuestion, type Quiz, type QuizQuestion, type TypedBlankQuestion, type VerseBuilderQuestion } from '../../utils/quiz';
 
 interface QuizPlayerProps {
   quiz: Quiz;
@@ -232,37 +232,33 @@ const TypedBoard: React.FC<{
   onSubmit: (words: string[]) => void;
 }> = ({ question, answered, onSubmit }) => {
   const [inputs, setInputs] = useState<string[]>(Array(question.answers.length).fill(''));
-  const words = verseWords(question.verseText);
+
+  // Colour each blank green/red once answered — no hints, so no answer ever leaks into another.
+  const inputClass = (i: number) => {
+    if (!answered) return 'border-gold-500/50 bg-soot-950/40 text-gold-100 focus:border-gold-400';
+    return matchesTypedAnswer(inputs[i], question.answers[i])
+      ? 'border-green-500 bg-green-500/10 text-green-200'
+      : 'border-red-500 bg-red-950/20 text-red-200';
+  };
 
   return (
     <form
       onSubmit={(e) => { e.preventDefault(); if (inputs.every((t) => t.trim()) && !answered) onSubmit(inputs); }}
-      className="space-y-3"
+      className="space-y-4"
     >
+      {/* Type directly into each blank, in context. */}
       <div className="text-xl font-bold leading-loose text-white">
-        {renderWithBlanks(question.prompt, () => (
-          <span className="mx-1 inline-block min-w-[3rem] border-b-2 border-gold-500/50 align-baseline">&nbsp;</span>
+        {renderWithBlanks(question.prompt, (i) => (
+          <input
+            value={inputs[i]}
+            onChange={(e) => setInputs((cur) => cur.map((t, j) => (j === i ? e.target.value : t)))}
+            disabled={answered}
+            autoFocus={i === 0}
+            size={Math.max(6, inputs[i].length + 1)}
+            aria-label={`Blank ${i + 1}`}
+            className={`mx-1 inline-block rounded border-b-2 px-2 py-0.5 text-center align-baseline text-lg outline-none ${inputClass(i)}`}
+          />
         ))}
-      </div>
-
-      <div className="space-y-2">
-        {question.blankIndexes.map((wi, i) => {
-          // A hint word before the blank helps the player know which blank this is.
-          const before = words.slice(Math.max(0, wi - 2), wi).join(' ');
-          return (
-            <div key={i} className="flex items-center gap-2">
-              <span className="w-32 shrink-0 truncate text-right text-xs text-ash-500">…{before}</span>
-              <input
-                value={inputs[i]}
-                onChange={(e) => setInputs((cur) => cur.map((t, j) => (j === i ? e.target.value : t)))}
-                disabled={answered}
-                autoFocus={i === 0}
-                placeholder={`Blank ${i + 1}`}
-                className="flex-1 rounded-xl border border-iron-800 bg-soot-950/60 p-3 text-white outline-none focus:border-gold-500/60 disabled:opacity-60"
-              />
-            </div>
-          );
-        })}
       </div>
 
       {!answered && (
