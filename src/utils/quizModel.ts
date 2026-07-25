@@ -107,13 +107,20 @@ export function matchesTypedAnswer(input: string, answer: string): boolean {
 
 const PAD_WORDS = ['faith', 'grace', 'mercy', 'glory', 'kingdom', 'spirit', 'covenant', 'righteous', 'truth', 'light', 'word', 'world'];
 
-/** Auto-picks ~1 blank per 9 words (1–3), from decent-length non-leading words. */
-function autoBlankIndexes(words: string[]): number[] {
+/** How much of a verse to blank when auto-filling. */
+export type BlankDifficulty = 'easy' | 'medium' | 'hard';
+const DIFFICULTY_FRACTION: Record<BlankDifficulty, number> = { easy: 0.2, medium: 0.4, hard: 0.65 };
+
+/** Auto-picks blanks by difficulty: a fraction of the decent-length, non-leading words. */
+function autoBlankIndexes(words: string[], difficulty: BlankDifficulty = 'medium'): number[] {
   const blankable = words
     .map((_, i) => ({ i, c: cleanWordAt(words, i) }))
     .filter((x) => x.i > 0 && x.c.length >= 4);
   if (!blankable.length) return [];
-  const count = Math.min(3, Math.max(1, Math.round(words.length / 9)));
+  const count = Math.min(
+    blankable.length,
+    Math.max(1, Math.round(blankable.length * DIFFICULTY_FRACTION[difficulty])),
+  );
   return shuffle(blankable, Math.random).slice(0, count).map((x) => x.i).sort((a, b) => a - b);
 }
 
@@ -148,10 +155,10 @@ function wordBank(words: string[], answers: string[]): string[] {
   return shuffle([...answers, ...distractors], Math.random);
 }
 
-/** Builds a fill-blanks question. `indexes` chooses the blanked words; omit to auto-pick 1–3. */
-export function blanksFromVerse(verse: Verse, indexes?: number[]): FillBlanksQuestion | null {
+/** Builds a fill-blanks question. `indexes` chooses the words; omit to auto-pick at `difficulty`. */
+export function blanksFromVerse(verse: Verse, indexes?: number[], difficulty?: BlankDifficulty): FillBlanksQuestion | null {
   const words = wordsOf(verse);
-  const idx = indexes?.length ? [...indexes].sort((a, b) => a - b) : autoBlankIndexes(words);
+  const idx = indexes?.length ? [...indexes].sort((a, b) => a - b) : autoBlankIndexes(words, difficulty);
   const answers = answersAt(words, idx);
   if (!answers.length || answers.some((a) => !a)) return null;
   return {
@@ -166,10 +173,10 @@ export function blanksFromVerse(verse: Verse, indexes?: number[]): FillBlanksQue
   };
 }
 
-/** Builds a type-the-words question. `indexes` chooses the blanks; omit to auto-pick. */
-export function typedFromVerse(verse: Verse, indexes?: number[]): TypedBlankQuestion | null {
+/** Builds a type-the-words question. `indexes` chooses the blanks; omit to auto-pick at `difficulty`. */
+export function typedFromVerse(verse: Verse, indexes?: number[], difficulty?: BlankDifficulty): TypedBlankQuestion | null {
   const words = wordsOf(verse);
-  const idx = indexes?.length ? [...indexes].sort((a, b) => a - b) : autoBlankIndexes(words);
+  const idx = indexes?.length ? [...indexes].sort((a, b) => a - b) : autoBlankIndexes(words, difficulty);
   const answers = answersAt(words, idx);
   if (!answers.length || answers.some((a) => !a)) return null;
   return {
@@ -181,6 +188,23 @@ export function typedFromVerse(verse: Verse, indexes?: number[]): TypedBlankQues
     blankIndexes: idx,
     answers,
   };
+}
+
+/** Re-blanks a fill-blanks question automatically at the given difficulty. Keeps id/explanation. */
+export function autoFillBlanks(q: FillBlanksQuestion, difficulty: BlankDifficulty): FillBlanksQuestion {
+  const words = verseWords(q.verseText);
+  const idx = autoBlankIndexes(words, difficulty);
+  if (!idx.length) return q;
+  const answers = answersAt(words, idx);
+  return { ...q, blankIndexes: idx, answers, options: wordBank(words, answers), prompt: promptWithBlanks(words, idx) };
+}
+
+/** Re-blanks a type-the-words question automatically at the given difficulty. Keeps id/explanation. */
+export function autoFillTyped(q: TypedBlankQuestion, difficulty: BlankDifficulty): TypedBlankQuestion {
+  const words = verseWords(q.verseText);
+  const idx = autoBlankIndexes(words, difficulty);
+  if (!idx.length) return q;
+  return { ...q, blankIndexes: idx, answers: answersAt(words, idx), prompt: promptWithBlanks(words, idx) };
 }
 
 /** Toggles a word in/out of the blanks for a fill-blanks question. Never removes the last blank. */

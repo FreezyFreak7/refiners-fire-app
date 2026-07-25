@@ -34,20 +34,56 @@ const VerseBuilderBoard: React.FC<{
         {placed.length === 0 ? (
           <span className="text-sm text-ash-600">Tap the chunks below in order…</span>
         ) : (
+          // Each placed chunk has ‹ › to nudge it left/right (fix a mistake without restarting) and
+          // the body taps back to the pool.
           <div className="flex flex-wrap gap-2">
             {placed.map((chunk, i) => (
-              <button
+              <div
                 key={`${chunk}-${i}`}
-                type="button"
-                disabled={answered}
-                onClick={() => {
-                  setPool((p) => [...p, chunk]);
-                  setPlaced((pl) => pl.filter((_, idx) => idx !== i));
-                }}
-                className="rounded-lg border border-gold-500/40 bg-gold-700/15 px-3 py-1.5 text-sm text-ash-200 disabled:cursor-default"
+                className="inline-flex items-stretch overflow-hidden rounded-lg border border-gold-500/40 bg-gold-700/15"
               >
-                {chunk}
-              </button>
+                <button
+                  type="button"
+                  disabled={answered || i === 0}
+                  aria-label="Move left"
+                  onClick={() =>
+                    setPlaced((pl) => {
+                      const n = [...pl];
+                      [n[i - 1], n[i]] = [n[i], n[i - 1]];
+                      return n;
+                    })
+                  }
+                  className="px-1.5 text-ash-400 hover:bg-gold-700/30 disabled:opacity-25"
+                >
+                  ‹
+                </button>
+                <button
+                  type="button"
+                  disabled={answered}
+                  onClick={() => {
+                    setPool((p) => [...p, chunk]);
+                    setPlaced((pl) => pl.filter((_, idx) => idx !== i));
+                  }}
+                  className="px-2 py-1.5 text-sm text-ash-200 disabled:cursor-default"
+                >
+                  {chunk}
+                </button>
+                <button
+                  type="button"
+                  disabled={answered || i === placed.length - 1}
+                  aria-label="Move right"
+                  onClick={() =>
+                    setPlaced((pl) => {
+                      const n = [...pl];
+                      [n[i], n[i + 1]] = [n[i + 1], n[i]];
+                      return n;
+                    })
+                  }
+                  className="px-1.5 text-ash-400 hover:bg-gold-700/30 disabled:opacity-25"
+                >
+                  ›
+                </button>
+              </div>
             ))}
           </div>
         )}

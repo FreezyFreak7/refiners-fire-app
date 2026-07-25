@@ -3,6 +3,8 @@ import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, CircleCheck, ListOrder
 import VersePicker from './VersePicker';
 import type { Verse } from '../../utils/bible';
 import {
+  autoFillBlanks,
+  autoFillTyped,
   blanksFromVerse,
   builderFromVerse,
   emptyQuestion,
@@ -12,6 +14,7 @@ import {
   typedFromVerse,
   validateQuestion,
   verseWords,
+  type BlankDifficulty,
   type FillBlanksQuestion,
   type MultipleChoiceQuestion,
   type Quiz,
@@ -20,6 +23,12 @@ import {
   type TypedBlankQuestion,
   type VerseBuilderQuestion,
 } from '../../utils/quiz';
+
+const AUTO_LEVELS: { key: BlankDifficulty; label: string }[] = [
+  { key: 'easy', label: 'Easy' },
+  { key: 'medium', label: 'Medium' },
+  { key: 'hard', label: 'Hard' },
+];
 
 interface QuizBuilderProps {
   quiz: Quiz;
@@ -240,8 +249,26 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
     </button>
   );
 
+  // One-click auto-fill: blank more or fewer words by difficulty.
+  const autoFillRow = (onPick: (d: BlankDifficulty) => void) => (
+    <div className="flex items-center gap-2">
+      <span className="text-xs font-bold uppercase tracking-widest text-ash-500">Auto-fill</span>
+      {AUTO_LEVELS.map(({ key, label }) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => onPick(key)}
+          className="rounded-lg border border-iron-800 bg-soot-900/70 px-3 py-1.5 text-xs font-black uppercase tracking-widest text-ash-300 hover:border-gold-500/40 hover:text-gold-400"
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
   const renderBlanks = (q: FillBlanksQuestion) => (
     <div className="space-y-3">
+      {autoFillRow((d) => update(q.id, autoFillBlanks(q, d)))}
       {wordChooser(q.verseText, q.blankIndexes, (i) => update(q.id, toggleBlanksWord(q, i)))}
       <div className="rounded-xl border border-iron-800 bg-soot-950/40 p-3">
         <div className="mb-2 text-xs font-bold uppercase tracking-widest text-ash-500">
@@ -271,6 +298,7 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
 
   const renderTyped = (q: TypedBlankQuestion) => (
     <div className="space-y-3">
+      {autoFillRow((d) => update(q.id, autoFillTyped(q, d)))}
       {wordChooser(q.verseText, q.blankIndexes, (i) => update(q.id, toggleTypedWord(q, i)))}
       <div className="rounded-xl border border-iron-800 bg-soot-950/40 p-3">
         <div className="text-lg text-white">{q.prompt}</div>
