@@ -1,17 +1,100 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle } from 'lucide-react';
-import type { Quiz, QuizQuestion } from '../../utils/quiz';
+import type { Quiz, QuizQuestion, VerseBuilderQuestion } from '../../utils/quiz';
 
 interface QuizPlayerProps {
   quiz: Quiz;
   onExit: () => void;
 }
 
-/** What the player picked: an option index for multiple choice, or a boolean for true/false. */
-type Answer = number | boolean;
+/** What the player picked: an option index (mc/blanks), a boolean (tf), or the built order (builder). */
+type Answer = number | boolean | string[];
 
-const isCorrect = (question: QuizQuestion, answer: Answer): boolean =>
-  question.kind === 'mc' ? answer === question.correctIndex : answer === question.isTrue;
+const shuffle = <T,>(items: T[]): T[] => {
+  const next = [...items];
+  for (let i = next.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [next[i], next[j]] = [next[j], next[i]];
+  }
+  return next;
+};
+
+/** Tap-to-order board for a verse-builder question. Local state resets via the parent's key. */
+const VerseBuilderBoard: React.FC<{
+  question: VerseBuilderQuestion;
+  answered: boolean;
+  onSubmit: (order: string[]) => void;
+}> = ({ question, answered, onSubmit }) => {
+  const [placed, setPlaced] = useState<string[]>([]);
+  const [pool, setPool] = useState<string[]>(() => shuffle(question.chunks));
+
+  return (
+    <div className="space-y-4">
+      <div className="min-h-[3rem] rounded-xl border border-iron-800 bg-soot-950/40 p-3">
+        {placed.length === 0 ? (
+          <span className="text-sm text-ash-600">Tap the chunks below in order…</span>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {placed.map((chunk, i) => (
+              <button
+                key={`${chunk}-${i}`}
+                type="button"
+                disabled={answered}
+                onClick={() => {
+                  setPool((p) => [...p, chunk]);
+                  setPlaced((pl) => pl.filter((_, idx) => idx !== i));
+                }}
+                className="rounded-lg border border-gold-500/40 bg-gold-700/15 px-3 py-1.5 text-sm text-ash-200 disabled:cursor-default"
+              >
+                {chunk}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!answered && pool.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {pool.map((chunk, i) => (
+            <button
+              key={`${chunk}-${i}`}
+              type="button"
+              onClick={() => {
+                setPlaced((pl) => [...pl, chunk]);
+                setPool((p) => p.filter((_, idx) => idx !== i));
+              }}
+              className="rounded-lg border border-iron-800 bg-soot-900/70 px-3 py-1.5 text-sm font-bold text-ash-200 transition-colors hover:border-gold-500/40 hover:bg-iron-800/40"
+            >
+              {chunk}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!answered && pool.length === 0 && (
+        <button
+          type="button"
+          onClick={() => onSubmit([...placed])}
+          className="btn-primary w-full rounded-xl py-3 text-sm font-black uppercase tracking-widest"
+        >
+          Check order
+        </button>
+      )}
+    </div>
+  );
+};
+
+const isCorrect = (question: QuizQuestion, answer: Answer): boolean => {
+  switch (question.kind) {
+    case 'mc':
+    case 'blanks':
+      return answer === question.correctIndex;
+    case 'tf':
+      return answer === question.isTrue;
+    case 'builder':
+      return Array.isArray(answer) && answer.join('') === question.chunks.join('');
+  }
+};
 
 const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
   const [index, setIndex] = useState(0);
@@ -24,11 +107,15 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
 
   const correctLabel = useMemo(() => {
     if (!question) return '';
-    return question.kind === 'mc'
-      ? question.options[question.correctIndex]
-      : question.isTrue
-        ? 'True'
-        : 'False';
+    switch (question.kind) {
+      case 'mc':
+      case 'blanks':
+        return question.options[question.correctIndex];
+      case 'tf':
+        return question.isTrue ? 'True' : 'False';
+      case 'builder':
+        return question.chunks.join(' ');
+    }
   }, [question]);
 
   const submit = (value: Answer) => {
@@ -115,9 +202,14 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
         </div>
       </div>
 
-      <div className="mb-5 text-lg font-bold text-white">{question.prompt}</div>
+      {question.reference && question.kind !== 'mc' && question.kind !== 'tf' && (
+        <div className="mb-2 text-sm font-black uppercase tracking-widest text-gold-400">{question.reference}</div>
+      )}
+      <div className="mb-5 text-xl font-bold leading-relaxed text-white">
+        {question.kind === 'builder' ? 'Put the verse back in order.' : question.prompt}
+      </div>
 
-      {question.kind === 'mc' ? (
+      {(question.kind === 'mc' || question.kind === 'blanks') && (
         <div className="space-y-2">
           {question.options.map((option, i) => (
             <button
@@ -125,7 +217,7 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
               type="button"
               onClick={() => submit(i)}
               disabled={answered}
-              className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm font-bold transition-colors disabled:cursor-default ${optionClass(
+              className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-base font-bold transition-colors disabled:cursor-default ${optionClass(
                 answer === i,
                 i === question.correctIndex,
               )}`}
@@ -136,7 +228,9 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
             </button>
           ))}
         </div>
-      ) : (
+      )}
+
+      {question.kind === 'tf' && (
         <div className="grid grid-cols-2 gap-2">
           {[true, false].map((value) => (
             <button
@@ -153,6 +247,11 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
             </button>
           ))}
         </div>
+      )}
+
+      {question.kind === 'builder' && (
+        // Keyed by id so each question starts with a fresh, freshly-scrambled board.
+        <VerseBuilderBoard key={question.id} question={question} answered={answered} onSubmit={submit} />
       )}
 
       {answered && (

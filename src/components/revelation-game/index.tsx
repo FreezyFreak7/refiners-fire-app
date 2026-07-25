@@ -69,18 +69,22 @@ const buildMpQuestionPool = (chapterId: string, count: number) => {
  * quiz, and embedding them guarantees everyone sees the identical set in the identical order.
  */
 const quizToRoomQuestions = (quiz: Quiz) =>
-  shuffleArray(quiz.questions).map((q: QuizQuestion) => {
+  shuffleArray(quiz.questions).flatMap((q: QuizQuestion) => {
+    // Verse-builder needs drag-to-reorder, which the room's pick-an-option model can't do yet, so
+    // those questions are left out of a hosted round. An all-builder quiz then has nothing to host
+    // and the "no questions" guard in mpStartGame catches it.
+    if (q.kind === 'builder') return [];
+
     const base = {
       kind: 'choice',
       prompt: q.prompt,
       verse: q.reference || '',
       explanation: q.explanation || '',
     };
-    if (q.kind === 'mc') {
-      const answer = q.options[q.correctIndex];
-      return { ...base, options: shuffleArray(q.options.filter((o) => o.trim())), blank: answer };
+    if (q.kind === 'mc' || q.kind === 'blanks') {
+      return [{ ...base, options: shuffleArray(q.options.filter((o) => o.trim())), blank: q.options[q.correctIndex] }];
     }
-    return { ...base, options: ['True', 'False'], blank: q.isTrue ? 'True' : 'False' };
+    return [{ ...base, options: ['True', 'False'], blank: q.isTrue ? 'True' : 'False' }];
   });
 
 const modeLabels: Record<string, string> = {
