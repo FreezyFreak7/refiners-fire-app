@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { signInAnonymously, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, onAuthStateChanged, GoogleAuthProvider, signInWithPopup, signInWithCredential, linkWithPopup, type AuthError } from 'firebase/auth';
 import RevelationGame from './components/revelation-game/index';
 import MemoryGame from './components/memory-game/GameifiedMemoryGame';
@@ -7,11 +7,14 @@ import AuthModal from './components/main-menu/AuthModal';
 import BackgroundShell from './components/main-menu/BackgroundShell';
 import LaunchAnimation from './components/main-menu/LaunchAnimation';
 import ProfilePage from './components/profile/ProfilePage';
+import QuizPlayScreen from './components/profile/QuizPlayScreen';
 import DailyChallenge from './components/daily/DailyChallenge';
 import FurnaceGame from './components/daily/FurnaceGame';
 import { auth } from './utils/firebase';
 import { subscribeUserProfile, type UserProfile } from './utils/userProfile';
 import { subscribeUserStats, type UserStats } from './utils/userStats';
+import { fetchSharedQuiz } from './utils/sharedQuiz';
+import type { Quiz } from './utils/quiz';
 
 const App: React.FC = () => {
   const [mode, setMode] = useState<'old_testament' | 'gospels' | 'new_testament' | 'revelation' | 'alpha_omega' | 'live_group' | 'profile' | 'daily' | 'furnace' | null>(null);
@@ -23,6 +26,8 @@ const App: React.FC = () => {
   const [authModalTab, setAuthModalTab] = useState<'login' | 'register'>('login');
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats | null>(null);
+  // A quiz being played on its own full-screen page — from the profile, or a shared link.
+  const [playingQuiz, setPlayingQuiz] = useState<{ quiz: Quiz; byline?: string; fromProfile: boolean } | null>(null);
 
   useEffect(() => {
     if (!auth) {
@@ -106,8 +111,46 @@ const App: React.FC = () => {
     };
   }, [isMember, user]);
 
+  // A ?quiz=<id> link opens that shared quiz on its own page. Needs auth (everyone is anon-signed
+  // in on load), so it waits for `user`, and runs once.
+  const sharedLoadedRef = useRef(false);
+  useEffect(() => {
+    if (!user || sharedLoadedRef.current) return;
+    const shareId = new URLSearchParams(window.location.search).get('quiz');
+    if (!shareId) return;
+    sharedLoadedRef.current = true;
+    fetchSharedQuiz(shareId)
+      .then((shared) => {
+        if (!shared) return;
+        setPlayingQuiz({
+          quiz: { id: shared.id, name: shared.name, questions: shared.questions, createdAt: null, updatedAt: null },
+          byline: shared.ownerName,
+          fromProfile: false,
+        });
+      })
+      .catch(console.error);
+  }, [user]);
+
+  const exitQuiz = () => {
+    const wasFromProfile = playingQuiz?.fromProfile;
+    setPlayingQuiz(null);
+    // Drop the ?quiz= param so a refresh doesn't reopen the shared quiz.
+    if (window.location.search.includes('quiz=')) {
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+    setMode(wasFromProfile ? 'profile' : null);
+  };
+
   if (showLaunch) {
     return <LaunchAnimation onComplete={() => setShowLaunch(false)} />;
+  }
+
+  if (playingQuiz) {
+    return (
+      <BackgroundShell>
+        <QuizPlayScreen quiz={playingQuiz.quiz} byline={playingQuiz.byline} onExit={exitQuiz} />
+      </BackgroundShell>
+    );
   }
 
   if (!mode) {
@@ -150,7 +193,11 @@ const App: React.FC = () => {
   return (
     <BackgroundShell>
       {mode === 'profile' && isMember && user && (
-        <ProfilePage user={user} onBack={() => setMode(null)} />
+        <ProfilePage
+          user={user}
+          onBack={() => setMode(null)}
+          onPlayQuiz={(quiz) => setPlayingQuiz({ quiz, fromProfile: true })}
+        />
       )}
       {mode === 'daily' && (
         <DailyChallenge

@@ -70,10 +70,10 @@ const buildMpQuestionPool = (chapterId: string, count: number) => {
  */
 const quizToRoomQuestions = (quiz: Quiz) =>
   shuffleArray(quiz.questions).flatMap((q: QuizQuestion) => {
-    // Verse-builder needs drag-to-reorder, which the room's pick-an-option model can't do yet, so
-    // those questions are left out of a hosted round. An all-builder quiz then has nothing to host
-    // and the "no questions" guard in mpStartGame catches it.
-    if (q.kind === 'builder') return [];
+    // The room only supports pick-an-option answering, so verse-builder (reorder) and type-the-word
+    // (free text) questions are left out of a hosted round. If that leaves nothing, the "no
+    // questions" guard in mpStartGame catches it.
+    if (q.kind === 'builder' || q.kind === 'type') return [];
 
     const base = {
       kind: 'choice',

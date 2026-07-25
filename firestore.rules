@@ -17,6 +17,15 @@ service cloud.firestore {
       allow read, write: if request.auth != null;
     }
 
+    // Shared quizzes: published snapshots anyone can play via a link. Public read (guests too);
+    // only the owner may create or overwrite their own shared copy.
+    match /artifacts/{appId}/public/data/quizzes/{shareId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null
+                   && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                   && request.resource.data.ownerUid == request.auth.uid;
+    }
+
     // World leaderboards for the challenge modes (daily, furnace, and future ones), one board per
     // boardId. Public to read; a member may only write their own score doc, and only to raise it
     // (keep-best). Anonymous users can view but not post.

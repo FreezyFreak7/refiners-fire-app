@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle } from 'lucide-react';
-import type { Quiz, QuizQuestion, VerseBuilderQuestion } from '../../utils/quiz';
+import { matchesTypedAnswer, type Quiz, type QuizQuestion, type VerseBuilderQuestion } from '../../utils/quiz';
 
 interface QuizPlayerProps {
   quiz: Quiz;
   onExit: () => void;
 }
 
-/** What the player picked: an option index (mc/blanks), a boolean (tf), or the built order (builder). */
-type Answer = number | boolean | string[];
+/** What the player gave: an option index (mc/blanks), a boolean (tf), typed text, or a built order. */
+type Answer = number | boolean | string | string[];
 
 const shuffle = <T,>(items: T[]): T[] => {
   const next = [...items];
@@ -91,9 +91,33 @@ const isCorrect = (question: QuizQuestion, answer: Answer): boolean => {
       return answer === question.correctIndex;
     case 'tf':
       return answer === question.isTrue;
+    case 'type':
+      return typeof answer === 'string' && matchesTypedAnswer(answer, question.answer);
     case 'builder':
       return Array.isArray(answer) && answer.join('') === question.chunks.join('');
   }
+};
+
+/** Text-entry board for a type-the-word question, keyed so it resets per question. */
+const TypeAnswerBoard: React.FC<{ answered: boolean; onSubmit: (text: string) => void }> = ({ answered, onSubmit }) => {
+  const [text, setText] = useState('');
+  return (
+    <form onSubmit={(e) => { e.preventDefault(); if (text.trim() && !answered) onSubmit(text); }} className="space-y-3">
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        disabled={answered}
+        autoFocus
+        placeholder="Type the missing word…"
+        className="w-full rounded-xl border border-iron-800 bg-soot-950/60 p-3 text-lg text-white outline-none focus:border-gold-500/60 disabled:opacity-60"
+      />
+      {!answered && (
+        <button type="submit" disabled={!text.trim()} className="btn-primary w-full rounded-xl py-3 text-sm font-black uppercase tracking-widest disabled:opacity-40">
+          Check answer
+        </button>
+      )}
+    </form>
+  );
 };
 
 const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
@@ -113,6 +137,8 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
         return question.options[question.correctIndex];
       case 'tf':
         return question.isTrue ? 'True' : 'False';
+      case 'type':
+        return question.answer;
       case 'builder':
         return question.chunks.join(' ');
     }
@@ -252,6 +278,10 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
       {question.kind === 'builder' && (
         // Keyed by id so each question starts with a fresh, freshly-scrambled board.
         <VerseBuilderBoard key={question.id} question={question} answered={answered} onSubmit={submit} />
+      )}
+
+      {question.kind === 'type' && (
+        <TypeAnswerBoard key={question.id} answered={answered} onSubmit={(t) => submit(t)} />
       )}
 
       {answered && (

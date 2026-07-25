@@ -1,17 +1,23 @@
 import React, { useState } from 'react';
-import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, CircleCheck, ListOrdered, Plus, RefreshCw, Trash2 } from 'lucide-react';
+import { AlertTriangle, BookOpen, ChevronDown, ChevronUp, CircleCheck, ListOrdered, Pencil, Plus, RefreshCw, Trash2 } from 'lucide-react';
 import VersePicker from './VersePicker';
 import type { Verse } from '../../utils/bible';
 import {
   blanksFromVerse,
   builderFromVerse,
   emptyQuestion,
+  isBlankableWord,
+  reblankAt,
+  retypeAt,
+  typedFromVerse,
   validateQuestion,
+  verseWords,
   type FillBlanksQuestion,
   type MultipleChoiceQuestion,
   type Quiz,
   type QuizQuestion,
   type TrueFalseQuestion,
+  type TypedBlankQuestion,
   type VerseBuilderQuestion,
 } from '../../utils/quiz';
 
@@ -25,6 +31,7 @@ const KIND_CHIP: Record<QuizQuestion['kind'], string> = {
   mc: 'Choice',
   tf: 'True/False',
   blanks: 'Blanks',
+  type: 'Type',
   builder: 'Builder',
 };
 
@@ -35,7 +42,7 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   // When set, the verse picker is open to generate a question of this kind (or replace `replaceId`).
   const [versePickerFor, setVersePickerFor] = useState<
-    { kind: 'blanks' | 'builder'; replaceId?: string } | null
+    { kind: 'blanks' | 'builder' | 'type'; replaceId?: string } | null
   >(null);
   const [genError, setGenError] = useState<string | null>(null);
 
@@ -51,11 +58,15 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
     setExpandedId(question.id);
   };
 
-  // Fill-blanks and verse-builder are generated from a picked verse rather than typed.
+  // Fill-blanks, type-the-word and verse-builder are generated from a picked verse.
   const handleVersePicked = (verse: Verse) => {
     if (!versePickerFor) return;
     const generated =
-      versePickerFor.kind === 'blanks' ? blanksFromVerse(verse) : builderFromVerse(verse);
+      versePickerFor.kind === 'blanks'
+        ? blanksFromVerse(verse)
+        : versePickerFor.kind === 'type'
+          ? typedFromVerse(verse)
+          : builderFromVerse(verse);
 
     if (!generated) {
       // Close so the error below the add buttons is visible (it would sit behind the picker).
@@ -185,11 +196,56 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
     </div>
   );
 
-  // Auto-generated types show a read-only preview and a "change verse" action.
+  // The verse, with each word tappable to choose which one is blanked.
+  const wordChooser = (verseText: string, blankIndex: number, onChoose: (i: number) => void) => (
+    <div>
+      <label className="mb-1 block text-xs font-bold uppercase tracking-widest text-ash-500">
+        Tap a word to blank it
+      </label>
+      <div className="flex flex-wrap gap-1.5 rounded-xl border border-iron-800 bg-soot-950/40 p-3 leading-relaxed">
+        {verseWords(verseText).map((word, i) => {
+          const blankable = isBlankableWord(word);
+          const chosen = i === blankIndex;
+          return (
+            <button
+              key={i}
+              type="button"
+              disabled={!blankable}
+              onClick={() => onChoose(i)}
+              className={`rounded px-1.5 py-0.5 text-sm transition-colors ${
+                chosen
+                  ? 'bg-gold-600 font-bold text-soot-950'
+                  : blankable
+                    ? 'text-ash-200 hover:bg-iron-800/60'
+                    : 'text-ash-600'
+              }`}
+            >
+              {word}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const changeVerseButton = (kind: 'blanks' | 'type', id: string) => (
+    <button
+      type="button"
+      onClick={() => setVersePickerFor({ kind, replaceId: id })}
+      className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-ash-500 hover:text-gold-400"
+    >
+      <RefreshCw size={12} /> Change verse
+    </button>
+  );
+
   const renderBlanks = (q: FillBlanksQuestion) => (
     <div className="space-y-3">
+      {wordChooser(q.verseText, q.blankIndex, (i) => {
+        const next = reblankAt(q, i);
+        if (next) update(q.id, next);
+      })}
       <div className="rounded-xl border border-iron-800 bg-soot-950/40 p-3">
-        <div className="mb-2 text-lg text-white">{q.prompt}</div>
+        <div className="mb-2 text-xs font-bold uppercase tracking-widest text-ash-500">Options (answer highlighted)</div>
         <div className="flex flex-wrap gap-2">
           {q.options.map((option, i) => (
             <span
@@ -205,13 +261,23 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
           ))}
         </div>
       </div>
-      <button
-        type="button"
-        onClick={() => setVersePickerFor({ kind: 'blanks', replaceId: q.id })}
-        className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-widest text-ash-500 hover:text-gold-400"
-      >
-        <RefreshCw size={12} /> Change verse
-      </button>
+      {changeVerseButton('blanks', q.id)}
+    </div>
+  );
+
+  const renderTyped = (q: TypedBlankQuestion) => (
+    <div className="space-y-3">
+      {wordChooser(q.verseText, q.blankIndex, (i) => {
+        const next = retypeAt(q, i);
+        if (next) update(q.id, next);
+      })}
+      <div className="rounded-xl border border-iron-800 bg-soot-950/40 p-3">
+        <div className="text-lg text-white">{q.prompt}</div>
+        <div className="mt-2 text-xs text-ash-500">
+          Players type the answer: <span className="font-bold text-green-300">{q.answer}</span>
+        </div>
+      </div>
+      {changeVerseButton('type', q.id)}
     </div>
   );
 
@@ -238,7 +304,7 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
     </div>
   );
 
-  const generatedKind = (k: QuizQuestion['kind']) => k === 'blanks' || k === 'builder';
+  const generatedKind = (k: QuizQuestion['kind']) => k === 'blanks' || k === 'builder' || k === 'type';
 
   return (
     <div>
@@ -302,6 +368,9 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
                         ? <span className="text-gold-400">{q.reference}</span>
                         : q.prompt.trim() || <span className="text-ash-600">Untitled question</span>}
                     </div>
+                    {q.kind === 'type' && (
+                      <div className="mt-0.5 text-xs text-ash-600">Answer: {q.answer}</div>
+                    )}
                   </button>
 
                   <button
@@ -321,7 +390,11 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
                         {q.reference && (
                           <div className="text-xs font-black uppercase tracking-widest text-gold-400">{q.reference}</div>
                         )}
-                        {q.kind === 'blanks' ? renderBlanks(q) : renderBuilder(q as VerseBuilderQuestion)}
+                        {q.kind === 'blanks'
+                          ? renderBlanks(q)
+                          : q.kind === 'type'
+                            ? renderTyped(q)
+                            : renderBuilder(q as VerseBuilderQuestion)}
                       </>
                     ) : (
                       <>
@@ -379,7 +452,7 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
 
       <div className="mt-4">
         <div className="mb-2 text-xs font-bold uppercase tracking-widest text-ash-500">Add a question</div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
           <button
             type="button"
             onClick={() => add('mc')}
@@ -403,6 +476,13 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
           </button>
           <button
             type="button"
+            onClick={() => { setGenError(null); setVersePickerFor({ kind: 'type' }); }}
+            className="inline-flex flex-col items-center gap-1 rounded-xl border border-iron-800 bg-soot-900/70 px-3 py-4 text-center text-xs font-black uppercase tracking-widest text-ash-200 transition-colors hover:border-gold-500/40 hover:bg-iron-800/40"
+          >
+            <Pencil size={16} className="text-gold-400" /> Type the word
+          </button>
+          <button
+            type="button"
             onClick={() => { setGenError(null); setVersePickerFor({ kind: 'builder' }); }}
             className="inline-flex flex-col items-center gap-1 rounded-xl border border-iron-800 bg-soot-900/70 px-3 py-4 text-center text-xs font-black uppercase tracking-widest text-ash-200 transition-colors hover:border-gold-500/40 hover:bg-iron-800/40"
           >
@@ -417,7 +497,13 @@ const QuizBuilder: React.FC<QuizBuilderProps> = ({ quiz, onChange }) => {
         onClose={() => { setVersePickerFor(null); setGenError(null); }}
         onSelect={handleVersePicked}
         actionLabel="USE"
-        title={versePickerFor?.kind === 'builder' ? 'Pick a verse to build' : 'Pick a verse to blank'}
+        title={
+          versePickerFor?.kind === 'builder'
+            ? 'Pick a verse to build'
+            : versePickerFor?.kind === 'type'
+              ? 'Pick a verse to type'
+              : 'Pick a verse to blank'
+        }
       />
     </div>
   );

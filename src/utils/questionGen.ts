@@ -13,7 +13,19 @@ export interface GenQuestion {
   prompt: string;
   options: string[];
   correctIndex: number;
+  /** Index (into the verse's words) that was blanked — lets an editor re-choose the blank. */
+  blankIndex: number;
 }
+
+/** Bare cleaned word at an index (letters/apostrophes only), for callers that pick their own word. */
+export const cleanWordAt = (words: string[], index: number) => clean(words[index] ?? '');
+
+/** Verse text with the word at `index` shown as a blank. */
+export const promptWithBlank = (words: string[], index: number) => {
+  const next = [...words];
+  next[index] = '_____';
+  return next.join(' ');
+};
 
 export interface Candidate {
   reference: string;
@@ -50,16 +62,31 @@ export function collectCandidates(data: BibleData): Candidate[] {
   return out;
 }
 
-export function buildQuestion(candidate: Candidate, rng: () => number): GenQuestion | null {
+/**
+ * Builds a fill-in question. If `forcedIndex` is given (an author choosing the word), that word is
+ * blanked; otherwise a decent-length word is picked at random via `rng`.
+ */
+export function buildQuestion(
+  candidate: Candidate,
+  rng: () => number,
+  forcedIndex?: number,
+): GenQuestion | null {
   const { words } = candidate;
 
-  // Blankable words: real words of decent length, not the first (often a name or "The").
-  const blankable = words
-    .map((word, index) => ({ index, clean: clean(word) }))
-    .filter((w) => w.index > 0 && w.clean.length >= 4);
-  if (!blankable.length) return null;
+  let targetIndex: number;
+  if (forcedIndex !== undefined) {
+    if (!clean(words[forcedIndex] ?? '')) return null;
+    targetIndex = forcedIndex;
+  } else {
+    // Blankable words: real words of decent length, not the first (often a name or "The").
+    const blankable = words
+      .map((word, index) => ({ index, clean: clean(word) }))
+      .filter((w) => w.index > 0 && w.clean.length >= 4);
+    if (!blankable.length) return null;
+    targetIndex = blankable[Math.floor(rng() * blankable.length)].index;
+  }
 
-  const target = blankable[Math.floor(rng() * blankable.length)];
+  const target = { index: targetIndex, clean: clean(words[targetIndex]) };
   const answer = target.clean;
 
   const distractorPool = words
@@ -90,5 +117,6 @@ export function buildQuestion(candidate: Candidate, rng: () => number): GenQuest
     prompt: promptWords.join(' '),
     options,
     correctIndex: options.findIndex((o) => o.toLowerCase() === answer.toLowerCase()),
+    blankIndex: target.index,
   };
 }

@@ -5,9 +5,9 @@
  */
 
 import { formatRef, type Verse } from './bible';
-import { buildQuestion, type Candidate } from './questionGen';
+import { buildQuestion, cleanWordAt, promptWithBlank, type Candidate } from './questionGen';
 
-export type QuizQuestionKind = 'mc' | 'tf' | 'blanks' | 'builder';
+export type QuizQuestionKind = 'mc' | 'tf' | 'blanks' | 'builder' | 'type';
 
 interface QuizQuestionBase {
   id: string;
@@ -28,14 +28,27 @@ export interface TrueFalseQuestion extends QuizQuestionBase {
   isTrue: boolean;
 }
 
-/** Auto-generated from a verse: the verse with one word blanked, and options to choose from. */
+/**
+ * Generated from a verse: the verse with one chosen word blanked, plus options. `verseText` and
+ * `blankIndex` are kept so the author can re-choose which word is blanked later.
+ */
 export interface FillBlanksQuestion extends QuizQuestionBase {
   kind: 'blanks';
+  verseText: string;
+  blankIndex: number;
   options: string[];
   correctIndex: number;
 }
 
-/** Auto-generated from a verse: ordered chunks the player reassembles. */
+/** Like fill-blanks, but the player types the missing word instead of choosing from options. */
+export interface TypedBlankQuestion extends QuizQuestionBase {
+  kind: 'type';
+  verseText: string;
+  blankIndex: number;
+  answer: string;
+}
+
+/** Generated from a verse: ordered chunks the player reassembles. */
 export interface VerseBuilderQuestion extends QuizQuestionBase {
   kind: 'builder';
   /** The chunks in their correct order. */
@@ -46,6 +59,7 @@ export type QuizQuestion =
   | MultipleChoiceQuestion
   | TrueFalseQuestion
   | FillBlanksQuestion
+  | TypedBlankQuestion
   | VerseBuilderQuestion;
 
 export interface Quiz {
@@ -60,6 +74,7 @@ export const QUESTION_KIND_LABELS: Record<QuizQuestionKind, string> = {
   mc: 'Multiple choice',
   tf: 'True / false',
   blanks: 'Fill blanks',
+  type: 'Type the word',
   builder: 'Verse builder',
 };
 
@@ -74,22 +89,73 @@ export function emptyQuestion(kind: 'mc' | 'tf'): QuizQuestion {
   return { id: newQuestionId(), kind: 'mc', prompt: '', options: ['', ''], correctIndex: 0 };
 }
 
-const wordsOf = (verse: Verse) => verse.text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+export const verseWords = (text: string) => text.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+const wordsOf = (verse: Verse) => verseWords(verse.text);
 const CHUNK_SIZE = 3;
 
-/** Builds a fill-blanks question from a verse, or null if the verse is too short to blank fairly. */
-export function blanksFromVerse(verse: Verse): FillBlanksQuestion | null {
-  const candidate: Candidate = { reference: formatRef(verse), words: wordsOf(verse) };
-  const q = buildQuestion(candidate, Math.random);
+/** True if a word can be blanked (has letters). Used to grey out punctuation-only tokens. */
+export const isBlankableWord = (word: string) => /[A-Za-z]/.test(word);
+
+/** Case- and punctuation-insensitive comparison for typed answers. */
+export function matchesTypedAnswer(input: string, answer: string): boolean {
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9']/g, '');
+  return norm(input) === norm(answer) && norm(input).length > 0;
+}
+
+/**
+ * Builds a fill-blanks question from a verse. `wordIndex` chooses which word to blank; omit it to
+ * auto-pick a good one. Returns null if the chosen word can't be blanked.
+ */
+export function blanksFromVerse(verse: Verse, wordIndex?: number): FillBlanksQuestion | null {
+  const words = wordsOf(verse);
+  const candidate: Candidate = { reference: formatRef(verse), words };
+  const q = buildQuestion(candidate, Math.random, wordIndex);
   if (!q || q.correctIndex < 0) return null;
   return {
     id: newQuestionId(),
     kind: 'blanks',
     prompt: q.prompt,
     reference: q.reference,
+    verseText: verse.text.replace(/\s+/g, ' ').trim(),
+    blankIndex: q.blankIndex,
     options: q.options,
     correctIndex: q.correctIndex,
   };
+}
+
+/** Builds a type-the-word question. `wordIndex` chooses the blank; omit to auto-pick. */
+export function typedFromVerse(verse: Verse, wordIndex?: number): TypedBlankQuestion | null {
+  const words = wordsOf(verse);
+  // Reuse the picker to choose a sensible default word when none is given.
+  const index = wordIndex ?? buildQuestion({ reference: '', words }, Math.random)?.blankIndex;
+  if (index === undefined) return null;
+  const answer = cleanWordAt(words, index);
+  if (!answer) return null;
+  return {
+    id: newQuestionId(),
+    kind: 'type',
+    prompt: promptWithBlank(words, index),
+    reference: formatRef(verse),
+    verseText: verse.text.replace(/\s+/g, ' ').trim(),
+    blankIndex: index,
+    answer,
+  };
+}
+
+/** Re-blanks a fill-blanks question at a different word, rebuilding its options. Keeps id/explanation. */
+export function reblankAt(q: FillBlanksQuestion, wordIndex: number): FillBlanksQuestion | null {
+  const words = verseWords(q.verseText);
+  const g = buildQuestion({ reference: q.reference ?? '', words }, Math.random, wordIndex);
+  if (!g || g.correctIndex < 0) return null;
+  return { ...q, prompt: g.prompt, blankIndex: wordIndex, options: g.options, correctIndex: g.correctIndex };
+}
+
+/** Re-picks the typed word. Keeps id/explanation. */
+export function retypeAt(q: TypedBlankQuestion, wordIndex: number): TypedBlankQuestion | null {
+  const words = verseWords(q.verseText);
+  const answer = cleanWordAt(words, wordIndex);
+  if (!answer) return null;
+  return { ...q, prompt: promptWithBlank(words, wordIndex), blankIndex: wordIndex, answer };
 }
 
 /** Splits a verse into ordered chunks for a builder question, or null if it's too short. */
@@ -121,6 +187,8 @@ export function validateQuestion(question: QuizQuestion): string | null {
       return question.options?.length >= 2 && question.options[question.correctIndex]
         ? null
         : 'This fill-blanks question is incomplete.';
+    case 'type':
+      return question.answer?.trim() ? null : 'This type-the-word question is incomplete.';
     case 'builder':
       return question.chunks?.length >= 2 ? null : 'This verse builder question is incomplete.';
   }
@@ -157,7 +225,9 @@ export function serializeQuestions(questions: QuizQuestion[]): QuizQuestion[] {
       case 'tf':
         return { ...base, kind: 'tf' as const, isTrue: q.isTrue };
       case 'blanks':
-        return { ...base, kind: 'blanks' as const, options: q.options, correctIndex: q.correctIndex };
+        return { ...base, kind: 'blanks' as const, verseText: q.verseText, blankIndex: q.blankIndex, options: q.options, correctIndex: q.correctIndex };
+      case 'type':
+        return { ...base, kind: 'type' as const, verseText: q.verseText, blankIndex: q.blankIndex, answer: q.answer };
       case 'builder':
         return { ...base, kind: 'builder' as const, chunks: q.chunks };
     }

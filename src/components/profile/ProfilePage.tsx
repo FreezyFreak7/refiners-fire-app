@@ -2,19 +2,21 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   BookmarkPlus,
+  Check,
   ChevronDown,
   ChevronUp,
   ListMusic,
   Play,
   Plus,
+  Share2,
   SquarePen,
   Trash2,
 } from 'lucide-react';
 import VersePicker from './VersePicker';
 import QuizBuilder from './QuizBuilder';
-import QuizPlayer from './QuizPlayer';
 import IdentityCard from './IdentityCard';
 import StatsPanel from './StatsPanel';
+import { publishSharedQuiz, shareUrl } from '../../utils/sharedQuiz';
 import { refToId, type Verse } from '../../utils/bible';
 import { EMPTY_STATS, subscribeUserStats, type UserStats } from '../../utils/userStats';
 import {
@@ -51,6 +53,8 @@ import {
 interface ProfilePageProps {
   user: { uid: string; displayName?: string | null; email?: string | null };
   onBack: () => void;
+  /** Plays a quiz on its own full-screen page (handled by App), not inline in the profile. */
+  onPlayQuiz: (quiz: Quiz) => void;
 }
 
 type ProfileTab = 'passages' | 'playlists' | 'quizzes';
@@ -59,7 +63,7 @@ type SaveState = 'idle' | 'saving' | 'saved';
 /** Autosave delay for the quiz editor — long enough that typing a question is one write, not thirty. */
 const QUIZ_SAVE_DELAY_MS = 800;
 
-const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack }) => {
+const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack, onPlayQuiz }) => {
   const [tab, setTab] = useState<ProfileTab>('passages');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [stats, setStats] = useState<UserStats>(EMPTY_STATS);
@@ -74,9 +78,10 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack }) => {
 
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [openQuizId, setOpenQuizId] = useState<string | null>(null);
-  const [playingQuizId, setPlayingQuizId] = useState<string | null>(null);
   const [newQuizName, setNewQuizName] = useState('');
   const [quizNameDraft, setQuizNameDraft] = useState<string | null>(null);
+  // Per-quiz share status for the copy-link button.
+  const [sharedQuizId, setSharedQuizId] = useState<string | null>(null);
 
   // The builder edits a local draft; writes are debounced so typing a question is one Firestore
   // write instead of one per keystroke.
@@ -168,10 +173,23 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack }) => {
   };
 
   const openQuiz = useMemo(() => quizzes.find((q) => q.id === openQuizId) ?? null, [quizzes, openQuizId]);
-  const playingQuiz = useMemo(
-    () => quizzes.find((q) => q.id === playingQuizId) ?? null,
-    [quizzes, playingQuizId],
-  );
+
+  const handleShareQuiz = async (quiz: Quiz) => {
+    setError(null);
+    try {
+      await publishSharedQuiz(quiz, user.uid, userProfile?.username || '');
+      const url = shareUrl(quiz.id);
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        // Clipboard can be blocked; the link is still live and the user can copy it manually.
+      }
+      setSharedQuizId(quiz.id);
+      window.setTimeout(() => setSharedQuizId((cur) => (cur === quiz.id ? null : cur)), 2500);
+    } catch (err) {
+      setError(describeFirestoreError(err as Error));
+    }
+  };
 
   /** The quiz as the builder should see it: the unsaved draft if there is one, else the stored copy. */
   const editingQuiz = useMemo(() => {
@@ -599,11 +617,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack }) => {
             </div>
           )}
 
-          {tab === 'quizzes' && playingQuiz && (
-            <QuizPlayer quiz={playingQuiz} onExit={() => setPlayingQuizId(null)} />
-          )}
-
-          {tab === 'quizzes' && !playingQuiz && !editingQuiz && (
+          {tab === 'quizzes' && !editingQuiz && (
             <div>
               <div className="mb-4 text-xs font-bold uppercase tracking-[0.35em] text-ash-600">
                 CUSTOM QUIZZES
@@ -654,12 +668,23 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack }) => {
 
                         <button
                           type="button"
-                          onClick={() => setPlayingQuizId(quiz.id)}
+                          onClick={() => onPlayQuiz(quiz)}
                           disabled={!!problem}
                           title={problem ?? 'Play this quiz'}
                           className="btn-primary inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-xs font-black uppercase tracking-widest disabled:cursor-not-allowed disabled:border-iron-800 disabled:bg-iron-800/40 disabled:text-ash-600"
                         >
                           <Play size={14} /> Play
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleShareQuiz(quiz)}
+                          disabled={!!problem}
+                          title={problem ? 'Finish the quiz to share it' : 'Copy a share link'}
+                          aria-label={`Share ${quiz.name}`}
+                          className="shrink-0 rounded-lg border border-iron-800 p-2 text-ash-500 hover:border-gold-500/40 hover:text-gold-400 disabled:opacity-40"
+                        >
+                          {sharedQuizId === quiz.id ? <Check size={14} className="text-green-400" /> : <Share2 size={14} />}
                         </button>
 
                         <button
@@ -691,7 +716,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack }) => {
             </div>
           )}
 
-          {tab === 'quizzes' && !playingQuiz && editingQuiz && (
+          {tab === 'quizzes' && editingQuiz && (
             <div>
               <div className="mb-4 flex items-center justify-between gap-3">
                 <button
@@ -721,8 +746,9 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack }) => {
                 <button
                   type="button"
                   onClick={() => {
+                    const quiz = editingQuiz;
                     closeQuizEditor();
-                    setPlayingQuizId(editingQuiz.id);
+                    onPlayQuiz(quiz);
                   }}
                   disabled={!!validateQuiz(editingQuiz)}
                   title={validateQuiz(editingQuiz) ?? 'Play this quiz'}
