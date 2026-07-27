@@ -68,13 +68,19 @@ const buildMpQuestionPool = (chapterId: string, count: number) => {
  * The questions are copied into the session doc at start: players can't read the host's private
  * quiz, and embedding them guarantees everyone sees the identical set in the identical order.
  */
+/**
+ * The room only supports pick-an-option answering, so type-the-word (free text), verse-builder
+ * (reorder) and multi-blank fill-ins can't be played live — only these convert.
+ */
+const roomPlayable = (q: QuizQuestion) =>
+  q.kind === 'mc' || q.kind === 'tf' || (q.kind === 'blanks' && q.blankIndexes.length === 1);
+
+/** How many of a quiz's questions can actually be hosted in a room. */
+const roomPlayableCount = (quiz: Quiz) => quiz.questions.filter(roomPlayable).length;
+
 const quizToRoomQuestions = (quiz: Quiz) =>
   shuffleArray(quiz.questions).flatMap((q: QuizQuestion) => {
-    // The room only supports pick-an-option answering. Verse-builder (reorder), type-the-word
-    // (free text) and multi-blank fill-blanks don't fit, so they're left out of a hosted round; if
-    // that leaves nothing, the "no questions" guard in mpStartGame catches it.
-    if (q.kind === 'builder' || q.kind === 'type') return [];
-    if (q.kind === 'blanks' && q.blankIndexes.length !== 1) return [];
+    if (!roomPlayable(q)) return [];
 
     const base = {
       kind: 'choice',
@@ -88,7 +94,10 @@ const quizToRoomQuestions = (quiz: Quiz) =>
     if (q.kind === 'blanks') {
       return [{ ...base, options: shuffleArray(q.options), blank: q.answers[0] }];
     }
-    return [{ ...base, options: ['True', 'False'], blank: q.isTrue ? 'True' : 'False' }];
+    if (q.kind === 'tf') {
+      return [{ ...base, options: ['True', 'False'], blank: q.isTrue ? 'True' : 'False' }];
+    }
+    return [];
   });
 
 const modeLabels: Record<string, string> = {
@@ -166,7 +175,8 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   }, [isMember, user?.uid]);
 
   // Only quizzes that are actually playable can be hosted.
-  const hostableQuizzes = myQuizzes.filter((q) => validateQuiz(q) === null);
+  // Only quizzes with at least one room-playable question — so picking one never dead-ends.
+  const hostableQuizzes = myQuizzes.filter((q) => validateQuiz(q) === null && roomPlayableCount(q) > 0);
 
   const mpSpeedKey: SpeedKey = (roomData?.speed as SpeedKey) || 'fast';
   const mpDurationMs = SPEED_SETTINGS[mpSpeedKey].seconds * 1000;
@@ -510,9 +520,18 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
                   <label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Select Quiz</label>
                   <select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectQuiz(e.target.value)} value={roomData.quizId || ''}>
-                    {hostableQuizzes.map((q) => <option key={q.id} value={q.id}>{q.name} ({q.questions.length})</option>)}
+                    {hostableQuizzes.map((q) => <option key={q.id} value={q.id}>{q.name} ({roomPlayableCount(q)})</option>)}
                   </select>
-                  <div className="mt-2 text-[11px] text-ash-600">Your quiz is shared with everyone in the room for this round.</div>
+                  {(() => {
+                    const picked = hostableQuizzes.find((q) => q.id === roomData.quizId);
+                    const skipped = picked ? picked.questions.length - roomPlayableCount(picked) : 0;
+                    return (
+                      <div className="mt-2 text-[11px] text-ash-600">
+                        Shared with everyone in the room.
+                        {skipped > 0 && ` ${skipped} question${skipped === 1 ? '' : 's'} (type-the-word, verse builder or multi-blank) can't play in a live room yet and will be skipped.`}
+                      </div>
+                    );
+                  })()}
                 </div>
               ) : (
                 <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4"><label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div>
