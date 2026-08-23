@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle } from 'lucide-react';
 import { matchesTypedAnswer, type FillBlanksQuestion, type Quiz, type QuizQuestion, type TypedBlankQuestion, type VerseBuilderQuestion } from '../../utils/quiz';
 
@@ -232,6 +232,7 @@ const TypedBoard: React.FC<{
   onSubmit: (words: string[]) => void;
 }> = ({ question, answered, onSubmit }) => {
   const [inputs, setInputs] = useState<string[]>(Array(question.answers.length).fill(''));
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // Colour each blank green/red once answered — no hints, so no answer ever leaks into another.
   const inputClass = (i: number) => {
@@ -239,6 +240,18 @@ const TypedBoard: React.FC<{
     return matchesTypedAnswer(inputs[i], question.answers[i])
       ? 'border-green-500 bg-green-500/10 text-green-200'
       : 'border-red-500 bg-red-950/20 text-red-200';
+  };
+
+  // Enter jumps to the next blank instead of submitting, so you never have to reach for the mouse mid-question.
+  const handleKeyDown = (i: number) => (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const next = inputRefs.current[i + 1];
+    if (next) {
+      next.focus();
+    } else if (inputs.every((t) => t.trim())) {
+      onSubmit(inputs);
+    }
   };
 
   return (
@@ -250,8 +263,10 @@ const TypedBoard: React.FC<{
       <div className="text-xl font-bold leading-loose text-white">
         {renderWithBlanks(question.prompt, (i) => (
           <input
+            ref={(el) => { inputRefs.current[i] = el; }}
             value={inputs[i]}
             onChange={(e) => setInputs((cur) => cur.map((t, j) => (j === i ? e.target.value : t)))}
+            onKeyDown={handleKeyDown(i)}
             disabled={answered}
             autoFocus={i === 0}
             size={Math.max(6, inputs[i].length + 1)}
