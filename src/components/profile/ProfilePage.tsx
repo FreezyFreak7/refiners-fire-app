@@ -350,7 +350,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ user, onBack, onPlayQuiz }) =
       <div className="mt-6">
         <IdentityCard
           profile={userProfile}
-          fallbackName={user.displayName || (user.email ? user.email.split('@')[0] : '')}
+          fallbackName={user.displayName || ''}
           email={user.email ?? null}
           onSaveUsername={handleSaveUsername}
           onSaveAvatar={handleSaveAvatar}

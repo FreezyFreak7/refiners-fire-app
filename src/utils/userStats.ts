@@ -58,6 +58,16 @@ export function computeStreak(lastDay: string | null, today: string, current: nu
   return 1;
 }
 
+/**
+ * The streak as it stands right now. The stored `currentStreak` is only updated when the player
+ * plays, so after a missed day it is stale; a streak is alive only if the last play was today or
+ * yesterday (UTC).
+ */
+export function liveStreak(stats: Pick<UserStats, 'currentStreak' | 'lastPlayedDay'> | null, today: string = utcDayKey()): number {
+  if (!stats?.lastPlayedDay) return 0;
+  return stats.lastPlayedDay === today || stats.lastPlayedDay === previousDay(today) ? stats.currentStreak : 0;
+}
+
 export function subscribeUserStats(
   uid: string,
   onChange: (stats: UserStats) => void,

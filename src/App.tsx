@@ -12,7 +12,7 @@ import DailyChallenge from './components/daily/DailyChallenge';
 import FurnaceGame from './components/daily/FurnaceGame';
 import { auth } from './utils/firebase';
 import { subscribeUserProfile, type UserProfile } from './utils/userProfile';
-import { subscribeUserStats, type UserStats } from './utils/userStats';
+import { liveStreak, subscribeUserStats, type UserStats } from './utils/userStats';
 import { fetchSharedQuiz } from './utils/sharedQuiz';
 import type { Quiz } from './utils/quiz';
 
@@ -153,13 +153,31 @@ const App: React.FC = () => {
     );
   }
 
+  // Opens sign-in on top of a results screen instead of leaving it, so the finished run is still
+  // there to post once the guest becomes a member.
+  const openAuthOverResults = () => {
+    setAuthModalTab('register');
+    setAuthModalOpen(true);
+  };
+
+  const authModal = (
+    <AuthModal
+      isOpen={authModalOpen}
+      initialTab={authModalTab}
+      onClose={() => setAuthModalOpen(false)}
+      onLogin={handleLogin}
+      onRegister={handleRegister}
+      onGoogle={handleGoogleAuth}
+    />
+  );
+
   if (!mode) {
     return (
       <>
         <MainMenu
           isMember={isMember}
           profile={profile}
-          streak={stats?.currentStreak ?? 0}
+          streak={liveStreak(stats)}
           onOpenDaily={() => setMode('daily')}
           onOpenFurnace={() => setMode('furnace')}
           onSelectMode={(m) => setMode(m)}
@@ -178,14 +196,7 @@ const App: React.FC = () => {
           onLogout={handleLogout}
         />
 
-        <AuthModal
-          isOpen={authModalOpen}
-          initialTab={authModalTab}
-          onClose={() => setAuthModalOpen(false)}
-          onLogin={handleLogin}
-          onRegister={handleRegister}
-          onGoogle={handleGoogleAuth}
-        />
+        {authModal}
       </>
     );
   }
@@ -205,11 +216,7 @@ const App: React.FC = () => {
           isMember={isMember}
           profile={profile}
           onBack={() => setMode(null)}
-          onOpenAuth={() => {
-            setMode(null);
-            setAuthModalTab('register');
-            setAuthModalOpen(true);
-          }}
+          onOpenAuth={openAuthOverResults}
         />
       )}
       {mode === 'furnace' && (
@@ -218,11 +225,7 @@ const App: React.FC = () => {
           isMember={isMember}
           profile={profile}
           onBack={() => setMode(null)}
-          onOpenAuth={() => {
-            setMode(null);
-            setAuthModalTab('register');
-            setAuthModalOpen(true);
-          }}
+          onOpenAuth={openAuthOverResults}
         />
       )}
       {(mode === 'old_testament' || mode === 'gospels' || mode === 'new_testament' || mode === 'alpha_omega') && (
@@ -235,12 +238,14 @@ const App: React.FC = () => {
       {(mode === 'revelation' || mode === 'live_group') && (
         <RevelationGame
           onBack={() => setMode(null)}
+          username={profile?.username || undefined}
           user={user}
           authLoading={authLoading}
           isMember={isMember}
           initialAppState={mode === 'live_group' ? 'lobby' : 'actSelect'}
         />
       )}
+      {authModal}
     </BackgroundShell>
   );
 };

@@ -1,5 +1,7 @@
 import type { BibleData } from './bible';
 import { shuffleArray } from './helpers';
+import type { ClassQuiz } from '../data/classQuizzes';
+import { buildWordPool, cleanWord, pickBlankIndexes, pickDistractors } from './blanks';
 
 /**
  * A single question as the live room understands it. Every source — Revelation's hand-authored
@@ -13,7 +15,7 @@ import { shuffleArray } from './helpers';
  *  - `options` the answer buttons, pre-shuffled so every client renders the identical order.
  *  - `blank`   the correct option.
  */
-export interface RoomQuestion {
+export interface ChoiceRoomQuestion {
   kind: 'choice';
   prompt: string;
   verse: string;
@@ -21,6 +23,49 @@ export interface RoomQuestion {
   blank: string;
   explanation?: string;
 }
+
+/**
+ * Verse builder: tap the chunks into the right order. `chunks` is pre-shuffled (same order on every
+ * client) and `blank` is the correct order joined with spaces, so scoring is the same string
+ * compare as a choice question.
+ */
+export interface BuilderRoomQuestion {
+  kind: 'builder';
+  prompt: string;
+  verse: string;
+  chunks: string[];
+  blank: string;
+  explanation?: string;
+}
+
+/**
+ * Several blanks in one verse, filled in order from a shared word bank (`options`, pre-shuffled,
+ * answers plus decoys). `answers` is the correct word for each blank, and `blank` is them joined
+ * with ' | ', so scoring stays the same string compare.
+ */
+export interface MultiBlankRoomQuestion {
+  kind: 'multi';
+  prompt: string;
+  verse: string;
+  options: string[];
+  answers: string[];
+  blank: string;
+  explanation?: string;
+}
+
+export type RoomQuestion = ChoiceRoomQuestion | BuilderRoomQuestion | MultiBlankRoomQuestion;
+
+export const MULTI_BLANK_SEPARATOR = ' | ';
+
+/** Builders take longer to answer than a tap, so they get this multiple of the room's timer. */
+export const BUILDER_TIME_SCALE = 2.5;
+
+/** Builders get BUILDER_TIME_SCALE; multi-blank verses get +75% of the timer per extra blank. */
+export const roomQuestionMs = (q: RoomQuestion | undefined, baseMs: number) => {
+  if (q?.kind === 'builder') return Math.round(baseMs * BUILDER_TIME_SCALE);
+  if (q?.kind === 'multi') return Math.round(baseMs * (1 + 0.75 * Math.max(0, q.answers.length - 1)));
+  return baseMs;
+};
 
 export type LibraryMode = 'blanks' | 'reference';
 
@@ -31,6 +76,7 @@ export type RoomSource =
   | 'new_testament'
   | 'gospels'
   | 'alpha_omega'
+  | 'class'
   | 'quiz';
 
 export const ROOM_SOURCE_LABELS: Record<RoomSource, string> = {
@@ -39,14 +85,13 @@ export const ROOM_SOURCE_LABELS: Record<RoomSource, string> = {
   new_testament: 'New Testament',
   gospels: 'The Gospels',
   alpha_omega: 'Alpha & Omega',
+  class: 'Class Quizzes',
   quiz: 'My Quiz',
 };
 
-const FALLBACK_WORDS = ['faith', 'truth', 'glory', 'spirit', 'kingdom', 'mercy', 'grace', 'light', 'word', 'love'];
 
 type VerseRecord = { ref: string; text: string };
 
-const cleanWord = (w: string) => w.replace(/[^A-Za-z']/g, '');
 const countWords = (t: string) => t.replace(/\s+/g, ' ').trim().split(' ').filter(Boolean).length;
 
 /**
@@ -110,37 +155,19 @@ const sampleVerses = (data: BibleData, books: string[], count: number): VerseRec
   return out;
 };
 
-// One verse -> a single-blank multiple-choice question. Picks a meaningful interior word, blanks
-// it, and fills the option list with other words from the same verse (plus common fallbacks so
-// short verses still get four choices).
-const buildBlank = (verse: VerseRecord): RoomQuestion | null => {
+// One verse -> a single-blank multiple-choice question. Uses the shared blank rules (no filler
+// words, nothing visible elsewhere in the verse) and wrong options drawn from the other verses in
+// the round, so the answer can't be read off the screen.
+const buildBlank = (verse: VerseRecord, wordPool: string[]): RoomQuestion | null => {
   const words = verse.text.split(' ');
-  const candidates = words
-    .map((w, i) => ({ i, clean: cleanWord(w) }))
-    .filter(({ i, clean }) => i > 0 && i < words.length - 1 && clean.length >= 4);
-  if (!candidates.length) return null;
-
-  const target = candidates[Math.floor(Math.random() * candidates.length)];
-  const answer = target.clean;
-  const prompt = words.map((w, i) => (i === target.i ? '_____' : w)).join(' ');
-
-  const distractors: string[] = [];
-  for (const w of shuffleArray(words.map(cleanWord))) {
-    if (distractors.length >= 3) break;
-    if (w.length < 4) continue;
-    if (w.toLowerCase() === answer.toLowerCase()) continue;
-    if (distractors.some((d) => d.toLowerCase() === w.toLowerCase())) continue;
-    distractors.push(w);
-  }
-  let fi = 0;
-  while (distractors.length < 3 && fi < FALLBACK_WORDS.length * 2) {
-    const f = FALLBACK_WORDS[fi % FALLBACK_WORDS.length];
-    fi += 1;
-    if (f.toLowerCase() === answer.toLowerCase()) continue;
-    if (distractors.some((d) => d.toLowerCase() === f.toLowerCase())) continue;
-    distractors.push(f);
-  }
-
+  const [index] = pickBlankIndexes(words, 1);
+  if (index === undefined) return null;
+  const word = words[index];
+  const answer = cleanWord(word);
+  if (!answer) return null;
+  const at = word.indexOf(answer);
+  const prompt = words.map((w, i) => (i === index ? `${w.slice(0, at)}_____${w.slice(at + answer.length)}` : w)).join(' ');
+  const distractors = pickDistractors(answer, verse.text, wordPool, 3);
   return { kind: 'choice', prompt, verse: verse.ref, options: shuffleArray([answer, ...distractors]), blank: answer };
 };
 
@@ -164,5 +191,23 @@ export const buildLibraryPool = (data: BibleData, books: string[], mode: Library
   if (mode === 'reference') {
     return shuffleArray(verses).slice(0, n).map((v) => buildReference(v, verses));
   }
-  return verses.map(buildBlank).filter((q): q is RoomQuestion => q !== null).slice(0, n);
+  const wordPool = buildWordPool(verses.map((v) => v.text));
+  return verses.map((v) => buildBlank(v, wordPool)).filter((q): q is RoomQuestion => q !== null).slice(0, n);
 };
+
+// Shuffle until the order differs from the answer (when it can), so a builder is never pre-solved.
+const scrambleChunks = (chunks: string[]): string[] => {
+  const answer = chunks.join(' ');
+  let out = shuffleArray(chunks);
+  for (let i = 0; i < 10 && out.join(' ') === answer && new Set(chunks).size > 1; i += 1) out = shuffleArray(chunks);
+  return out;
+};
+
+/** A class quiz -> room questions, in the written order, with options and chunks shuffled once by the host. */
+export const buildClassQuizPool = (quiz: ClassQuiz): RoomQuestion[] =>
+  quiz.questions.map((q): RoomQuestion =>
+ q.kind === 'blank'
+      ? q.answers.length === 1
+        ? { kind: 'choice', prompt: q.prompt, verse: q.verse, options: shuffleArray([q.answers[0], ...q.decoys]), blank: q.answers[0] }
+        : { kind: 'multi', prompt: q.prompt, verse: q.verse, options: shuffleArray([...q.answers, ...q.decoys]), answers: q.answers, blank: q.answers.join(MULTI_BLANK_SEPARATOR) }
+      : { kind: 'builder', prompt: 'Put the verse in order.', verse: q.verse, chunks: scrambleChunks(q.chunks), blank: q.chunks.join(' ') });
