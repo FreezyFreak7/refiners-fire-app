@@ -4,9 +4,9 @@ import Leaderboard from './Leaderboard';
 import { loadBible } from '../../utils/bible';
 import { FURNACE_LIVES, SurvivalDeck, timeForStreak } from '../../utils/survival';
 import type { GenQuestion } from '../../utils/questionGen';
-import { fetchRank, submitScore } from '../../utils/leaderboard';
-import { recordActivity } from '../../utils/userStats';
 import type { UserProfile } from '../../utils/userProfile';
+import { usePostResult } from './usePostResult';
+import ClaimUsername from './ClaimUsername';
 
 interface FurnaceGameProps {
   user: { uid: string } | null;
@@ -35,10 +35,13 @@ const FurnaceGame: React.FC<FurnaceGameProps> = ({ user, isMember, profile, onBa
   const [questionTime, setQuestionTime] = useState(0);
   const deadline = useRef(0);
 
-  const [rank, setRank] = useState<number | null>(null);
-  const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [newStreak, setNewStreak] = useState<number | null>(null);
-  const [boardRefresh, setBoardRefresh] = useState(0);
+  // One answer per question; a ref so StrictMode's double-invoked updaters can't double-score.
+  const answeredRef = useRef(false);
+
+  const [result, setResult] = useState<{ score: number; versesCorrect: number } | null>(null);
+  const { submitState, rank, newStreak, boardRefresh, reset: resetPost } = usePostResult({
+    user, isMember, profile, boardId: BOARD_ID, mode: 'furnace', result,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -59,6 +62,7 @@ const FurnaceGame: React.FC<FurnaceGameProps> = ({ user, isMember, profile, onBa
   const askNext = useCallback((atStreak: number) => {
     if (!deckRef.current) return;
     setQuestion(deckRef.current.next());
+    answeredRef.current = false;
     setPicked(null);
     const time = timeForStreak(atStreak);
     setQuestionTime(time);
@@ -66,49 +70,22 @@ const FurnaceGame: React.FC<FurnaceGameProps> = ({ user, isMember, profile, onBa
     setPhase('playing');
   }, []);
 
-  const finish = useCallback(
-    async (finalScore: number) => {
-      setPhase('over');
-      if (!isMember || !user) return;
-
-      // Verses survived this run = correct answers, so the lifetime counter grows by the score.
-      recordActivity(user.uid, { versesCorrect: finalScore, mode: 'furnace', score: finalScore })
-        .then((res) => setNewStreak(res.streak))
-        .catch(() => {});
-
-      if (profile?.username) {
-        try {
-          setSubmitState('saving');
-          await submitScore(BOARD_ID, {
-            uid: user.uid,
-            username: profile.username,
-            avatarId: profile.avatarId,
-            score: finalScore,
-          });
-          setSubmitState('saved');
-          setRank(await fetchRank(BOARD_ID, finalScore));
-        } catch {
-          setSubmitState('error');
-        } finally {
-          setBoardRefresh((n) => n + 1);
-        }
-      }
-    },
-    [isMember, user, profile],
-  );
+  // Verses survived this run = correct answers, so the lifetime counter grows by the score.
+  const finish = (finalScore: number) => {
+    setPhase('over');
+    setResult({ score: finalScore, versesCorrect: finalScore });
+  };
 
   // Reveal + resolve one answer. `choice === null` means the clock ran out (a miss).
   const answer = useCallback(
     (choice: number | null) => {
-      setPhase((p) => {
-        if (p !== 'playing' || !question) return p;
-        setPicked(choice);
-        const correct = choice !== null && choice === question.correctIndex;
-
-        if (correct) setStreak((s) => s + 1);
-        else setLives((l) => l - 1);
-        return 'reveal';
-      });
+      if (answeredRef.current || !question) return;
+      answeredRef.current = true;
+      setPicked(choice);
+      const correct = choice !== null && choice === question.correctIndex;
+      if (correct) setStreak((s) => s + 1);
+      else setLives((l) => l - 1);
+      setPhase('reveal');
     },
     [question],
   );
@@ -134,7 +111,7 @@ const FurnaceGame: React.FC<FurnaceGameProps> = ({ user, isMember, profile, onBa
     if (!wasCorrect && lives <= 0) {
       finish(streak);
     } else {
-      askNext(wasCorrect ? streak : streak); // streak already updated in state
+      askNext(streak); // streak already updated in state
     }
   };
 
@@ -218,7 +195,9 @@ const FurnaceGame: React.FC<FurnaceGameProps> = ({ user, isMember, profile, onBa
             </div>
           )}
 
-          {isMember ? (
+          {isMember && user && !profile?.username ? (
+            <ClaimUsername uid={user.uid} />
+          ) : isMember ? (
             <div className="mt-3 text-sm text-ash-500">
               {submitState === 'saving' && 'Posting your run…'}
               {submitState === 'saved' && rank !== null && (
@@ -243,9 +222,8 @@ const FurnaceGame: React.FC<FurnaceGameProps> = ({ user, isMember, profile, onBa
           <button
             type="button"
             onClick={() => {
-              setRank(null);
-              setSubmitState('idle');
-              setNewStreak(null);
+              resetPost();
+              setResult(null);
               setLives(FURNACE_LIVES);
               setStreak(0);
               askNext(0);

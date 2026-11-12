@@ -11,6 +11,15 @@ service cloud.firestore {
       return boardId.matches('daily-.*') ? 2000 : 100000;
     }
 
+    // The name on a score must be one this player has actually reserved in /usernames, so nobody
+    // can post under someone else's name or an unvetted one.
+    function ownsUsername(name, uid) {
+      let key = name.lower();
+      return name is string
+          && exists(/databases/$(database)/documents/usernames/$(key))
+          && get(/databases/$(database)/documents/usernames/$(key)).data.uid == uid;
+    }
+
     // Live game rooms are shared between players in a session, so any signed-in player
     // (including anonymous ones, which is how everyone starts) can read and write them.
     match /artifacts/{appId}/public/data/sessions/{code} {
@@ -18,12 +27,22 @@ service cloud.firestore {
     }
 
     // Shared quizzes: published snapshots anyone can play via a link. Public read (guests too);
-    // only the owner may create or overwrite their own shared copy.
+    // only the owner may create, overwrite or delete their own shared copy. Update and delete check
+    // the EXISTING owner, so someone holding the link can't take over a quiz by writing their uid.
     match /artifacts/{appId}/public/data/quizzes/{shareId} {
       allow read: if request.auth != null;
-      allow write: if request.auth != null
-                   && request.auth.token.firebase.sign_in_provider != 'anonymous'
-                   && request.resource.data.ownerUid == request.auth.uid;
+
+      allow create: if request.auth != null
+                    && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                    && request.resource.data.ownerUid == request.auth.uid;
+
+      allow update: if request.auth != null
+                    && request.auth.token.firebase.sign_in_provider != 'anonymous'
+                    && resource.data.ownerUid == request.auth.uid
+                    && request.resource.data.ownerUid == request.auth.uid;
+
+      allow delete: if request.auth != null
+                    && resource.data.ownerUid == request.auth.uid;
     }
 
     // World leaderboards for the challenge modes (daily, furnace, and future ones), one board per
@@ -45,7 +64,8 @@ service cloud.firestore {
                     && request.resource.data.uid == userId
                     && request.resource.data.score is int
                     && request.resource.data.score >= 0
-                    && request.resource.data.score <= boardCap(boardId);
+                    && request.resource.data.score <= boardCap(boardId)
+                    && ownsUsername(request.resource.data.username, userId);
 
       allow update: if request.auth != null
                     && request.auth.token.firebase.sign_in_provider != 'anonymous'
@@ -53,7 +73,8 @@ service cloud.firestore {
                     && request.resource.data.uid == userId
                     && request.resource.data.score is int
                     && request.resource.data.score >= resource.data.score
-                    && request.resource.data.score <= boardCap(boardId);
+                    && request.resource.data.score <= boardCap(boardId)
+                    && ownsUsername(request.resource.data.username, userId);
     }
 
     // Private profile data: saved passages, playlists, quizzes, and the profile doc
@@ -77,6 +98,7 @@ service cloud.firestore {
                     && request.resource.data.uid == request.auth.uid;
 
       allow update: if request.auth != null
+                    && request.auth.token.firebase.sign_in_provider != 'anonymous'
                     && resource.data.uid == request.auth.uid
                     && request.resource.data.uid == request.auth.uid;
 

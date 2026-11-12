@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Flame, Award, BookOpen, Layers, Home, Scroll, Mail, Megaphone, Droplet, Scale, Sun, Sword, Search, Users, Radio, Trophy, ArrowRight, ArrowLeft, Key, ChevronRight, AlertTriangle } from 'lucide-react';
-import { doc, setDoc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
+import { Flame, Award, BookOpen, Layers, Home, Scroll, Mail, Megaphone, Droplet, Scale, Sun, Sword, Search, Users, Radio, Trophy, ArrowRight, ArrowLeft, Key, ChevronRight } from 'lucide-react';
+import { doc, setDoc, onSnapshot, updateDoc, getDoc, deleteField } from 'firebase/firestore';
 
 import { db } from '../../utils/firebase';
 import { APP_ID } from '../../utils/appConfig';
@@ -8,11 +8,15 @@ import { subscribeQuizzes, validateQuiz, type Quiz, type QuizQuestion } from '..
 import { expandedGameData as gameData } from '../../data/expandedGameDataSource';
 import { acts } from '../../data/acts';
 import { chapters } from '../../data/chapters';
+import { CLASS_QUIZZES } from '../../data/classQuizzes';
 import { shuffleArray } from '../../utils/helpers';
 import { loadBible, type BibleData } from '../../utils/bible';
 import {
   booksForSource,
+  buildClassQuizPool,
   buildLibraryPool,
+  MULTI_BLANK_SEPARATOR,
+  roomQuestionMs,
   ROOM_SOURCE_LABELS,
   type LibraryMode,
   type RoomQuestion,
@@ -50,21 +54,48 @@ const isVerseQuestion = (q: { verse?: unknown }) =>
 
 const verseBlanks = (key: string) => (gameData[key]?.blanks || []).filter(isVerseQuestion);
 
-// Total fill-blank questions available across every chapter — used to cap the verse slider.
-const MP_TOTAL_AVAILABLE = Object.keys(gameData).reduce((sum, key) => sum + verseBlanks(key).length, 0);
+// Every verse reference used anywhere in the Revelation set ("1:8", "21:4", ...), for Reference decoys.
+const ALL_REV_REFS: string[] = [...new Set(Object.keys(gameData).flatMap((key) => verseBlanks(key).map((q: any) => q.verse as string)))];
 
-// Build the shared question list for an online round. The selected chapter's verses come
-// first, then verses from other chapters fill up to `count`. Options are pre-shuffled here so
+// Every answer word across Revelation, for padding blank options on levels that want more choices
+// than a question was authored with (Sealed asks for 6; the data has 4).
+const ALL_REV_ANSWERS: string[] = [...new Set(Object.keys(gameData).flatMap((key) => verseBlanks(key).flatMap((q: any) => [q.blank, ...(q.options || [])] as string[])))];
+
+const chapterOf = (ref: string) => ref.split(':')[0];
+
+/** Wrong references that look plausible: real Revelation refs, half from the same chapter if possible. */
+const referenceDecoys = (correct: string, count: number): string[] => {
+  const others = ALL_REV_REFS.filter((r) => r !== correct);
+  const sameChapter = shuffleArray(others.filter((r) => chapterOf(r) === chapterOf(correct)));
+  const elsewhere = shuffleArray(others.filter((r) => chapterOf(r) !== chapterOf(correct)));
+  const half = Math.ceil(count / 2);
+  const picked = [...sameChapter.slice(0, half), ...elsewhere].slice(0, count);
+  return picked.length >= count ? picked : [...picked, ...sameChapter.slice(half)].slice(0, count);
+};
+
+/** Authored wrong options first, then other Revelation answers not visible in this verse. */
+const blankDistractors = (q: any, count: number): string[] => {
+  const visible = `${q.textBefore || ''} ${q.textAfter || ''}`.toLowerCase();
+  const authored = (q.options || []).filter((opt: string) => opt !== q.blank);
+  const extra = shuffleArray(ALL_REV_ANSWERS.filter((w) =>
+    w !== q.blank && !authored.includes(w) && !visible.includes(w.toLowerCase())));
+  return [...shuffleArray(authored), ...extra].slice(0, count);
+};
+
+const joinVerse = (...parts: string[]) => parts.join(' ').replace(/\s+([.,;:!?])/g, '$1').replace(/\s+/g, ' ').trim();
+
+// How many verse questions the selected Revelation chapter has — used to cap the verse slider.
+const chapterVerseCount = (chapterId: string) => verseBlanks(chapterId).length;
+
+// Build the shared question list for an online round from the selected chapter only. Options are pre-shuffled here so
 // every player renders the identical set in the identical order (the host writes this to the
 // session and all clients read it back). Emits the same `choice` shape as every other source so
 // the room has a single renderer, with the verse reference shown above each question.
 const buildMpQuestionPool = (chapterId: string, count: number): RoomQuestion[] => {
-  const primary = verseBlanks(chapterId);
-  const others = Object.keys(gameData)
-    .filter((key) => key !== chapterId)
-    .flatMap((key) => verseBlanks(key));
-  const target = Math.max(1, Math.min(count, MP_TOTAL_AVAILABLE));
-  const combined = [...primary, ...shuffleArray(others)].slice(0, target);
+  // Only the selected chapter's verses: never pad with other chapters, even if that means
+  // fewer questions than the slider asked for.
+  const target = Math.max(1, Math.min(count, verseBlanks(chapterId).length));
+  const combined = shuffleArray(verseBlanks(chapterId)).slice(0, target);
   return shuffleArray(
     combined.map((q: any) => {
       const prompt = `${q.textBefore || ''} _____ ${q.textAfter || ''}`.replace(/\s+/g, ' ').trim();
@@ -139,13 +170,15 @@ const actIconMap: Record<string, React.ComponentType<any>> = {
 
 interface RevelationGameProps {
   onBack: () => void;
+  /** The member's username, used to prefill the live-room name. */
+  username?: string;
   user: any;
   authLoading: boolean;
   isMember: boolean;
   initialAppState?: 'actSelect' | 'lobby';
 }
 
-const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState = 'actSelect' }: RevelationGameProps) => {
+const RevelationGame = ({ onBack, username, user, authLoading, isMember, initialAppState = 'actSelect' }: RevelationGameProps) => {
   const [appId] = useState(APP_ID);
   const isMaster = !!isMember;
   const lobbyReturnToMainMenu = initialAppState === 'lobby';
@@ -176,7 +209,18 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   });
 
   // Multiplayer State
-  const [playerName, setPlayerName] = useState('');
+  // Prefilled from the member's username, so they don't retype it every time.
+  const [playerName, setPlayerName] = useState(username ?? '');
+  // Inline error for the lobby and host setup, in place of browser alert() popups.
+  const [mpError, setMpError] = useState<string | null>(null);
+  // Create/join talk to Firestore and can take a second on a cold start; show that it's working.
+  const [mpBusy, setMpBusy] = useState<'create' | 'join' | null>(null);
+  // The profile can arrive after this screen mounts; fill the name in then if it's still empty.
+  const [prefilledFrom, setPrefilledFrom] = useState(username ?? '');
+  if (username && username !== prefilledFrom) {
+    setPrefilledFrom(username);
+    if (!playerName) setPlayerName(username);
+  }
   const [roomCode, setRoomCode] = useState('');
   const [isHost, setIsHost] = useState(false);
   const [roomData, setRoomData] = useState<any>(null);
@@ -218,6 +262,12 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
 
   const mpSpeedKey: SpeedKey = (roomData?.speed as SpeedKey) || 'fast';
   const mpDurationMs = SPEED_SETTINGS[mpSpeedKey].seconds * 1000;
+  // This question's timer: builders get longer than a tap-to-answer question.
+  const mpQuestionMs = roomQuestionMs(roomData?.questions?.[roomData?.questionIndex ?? 0], mpDurationMs);
+  // Live-room verse builder: indexes into the current question's chunks, in the order tapped.
+  const [mpPlaced, setMpPlaced] = useState<number[]>([]);
+  // Live-room multi-blank verse: for each blank, the word-bank index placed there (null = empty).
+  const [mpSlots, setMpSlots] = useState<(number | null)[]>([]);
 
   const totalPossibleScore = activeQuestions.length
     ? activeQuestions.length * 10 + activeQuestions.length * (activeQuestions.length - 1)
@@ -226,16 +276,36 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   const feedbackLabel = feedback === 'correct' ? 'Correct' : feedback === 'incorrect' ? 'Wrong' : null;
 
   // --- MULTIPLAYER LOGIC ---
-  const generateRoomCode = () => Math.random().toString(36).substring(2, 6).toUpperCase();
+  // No 0/O or 1/I/L, so a code read aloud or off a screen can't be mistyped.
+  const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const generateRoomCode = () =>
+    Array.from({ length: 4 }, () => CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)]).join('');
+
+  const freshPlayer = (name: string) => ({ name, score: 0, status: 'joined', lastAnswered: -1, lastGain: 0 });
 
   const createSession = async () => {
-    if (!user || !playerName) return alert("Please enter a name!");
-    const code = generateRoomCode();
+    if (mpBusy) return;
+    if (!user) return setMpError('Still connecting. Try again in a moment.');
+    if (!playerName.trim()) return setMpError('Enter your name first.');
+    setMpError(null);
+    setMpBusy('create');
+    try { await openRoom(); } catch { setMpError('Could not open a room. Check your connection and try again.'); } finally { setMpBusy(null); }
+  };
+
+  const openRoom = async () => {
+
+    // Never overwrite a room someone else is using: retry until we land on an unused code.
+    let code = '';
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      const candidate = generateRoomCode();
+      const snap = await getDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sessions', candidate));
+      if (!snap.exists() || snap.data()?.hostId === user.uid) { code = candidate; break; }
+    }
+    if (!code) return setMpError('Could not open a room. Try again.');
+
     setRoomCode(code);
     setIsHost(true);
-
-    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', code);
-    await setDoc(sessionRef, {
+    await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'sessions', code), {
       hostId: user.uid,
       status: 'waiting',
       source: 'revelation',
@@ -245,24 +315,48 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
       phase: 'question',
       speed: 'fast',
       verseCount: 10,
-      players: { [user.uid]: { name: playerName, score: 0, status: 'joined', lastAnswered: -1, lastGain: 0 } }
+      createdAt: Date.now(),
+      players: { [user.uid]: freshPlayer(playerName.trim()) },
     });
     setAppState('multiplayer_room');
   };
 
   const joinSession = async () => {
-    if (!user || !playerName || !roomCode) return alert("Please enter name and code!");
-    const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    if (mpBusy) return;
+    if (!user) return setMpError('Still connecting. Try again in a moment.');
+    if (!playerName.trim() || roomCode.length !== 4) return setMpError('Enter your name and the 4-letter code.');
+    setMpError(null);
+    setMpBusy('join');
+    try { await enterRoom(); } catch { setMpError('Could not join. Check your connection and try again.'); } finally { setMpBusy(null); }
+  };
+
+  const enterRoom = async () => {
+    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     const sessionSnap = await getDoc(sessionRef);
-    if (sessionSnap.exists()) {
-      setIsHost(false);
-      const currentData = sessionSnap.data();
-      const updatedPlayers = { ...currentData.players, [user.uid]: { name: playerName, score: 0, status: 'joined', lastAnswered: -1, lastGain: 0 } };
-      await updateDoc(sessionRef, { players: updatedPlayers });
-      setAppState('multiplayer_room');
-    } else {
-      alert("Room not found!");
+    if (!sessionSnap.exists()) return setMpError(`No room with code ${roomCode}. Check it with your host.`);
+
+    const data = sessionSnap.data();
+    setIsHost(data.hostId === user.uid);
+    // Write only this player's own entry, so two people joining at once can't overwrite each
+    // other. Rejoining keeps your score; only the name is refreshed.
+    const existing = data.players?.[user.uid];
+    await updateDoc(sessionRef, {
+      [`players.${user.uid}`]: existing ? { ...existing, name: playerName.trim() } : freshPlayer(playerName.trim()),
+    });
+    setAppState('multiplayer_room');
+  };
+
+  // Leaving removes your seat, so the host isn't left waiting on an answer that will never come.
+  const leaveRoom = async () => {
+    if (user && roomCode) {
+      const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+      updateDoc(sessionRef, { [`players.${user.uid}`]: deleteField() }).catch(() => {});
     }
+    setRoomData(null);
+    setActiveQuestions([]);
+    setRoomCode('');
+    setIsHost(false);
+    if (lobbyReturnToMainMenu) onBack(); else setAppState('actSelect');
   };
 
   useEffect(() => {
@@ -307,10 +401,13 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     if (scoreboardTimerRef.current) { window.clearTimeout(scoreboardTimerRef.current); scoreboardTimerRef.current = null; }
     setMpFeedback(null);
     setMpLastGain(0);
-    setMpTimeLeft(mpDurationMs);
+    setMpPlaced([]);
+    const q = roomData?.questions?.[idx];
+    setMpSlots(q?.kind === 'multi' ? q.answers.map(() => null) : []);
+    setMpTimeLeft(mpQuestionMs);
     const startedAt = Date.now();
     const id = window.setInterval(() => {
-      const left = Math.max(0, mpDurationMs - (Date.now() - startedAt));
+      const left = Math.max(0, mpQuestionMs - (Date.now() - startedAt));
       setMpTimeLeft(left);
       if (left <= 0) {
         window.clearInterval(id);
@@ -326,7 +423,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
       }
     }, 100);
     return () => window.clearInterval(id);
-  }, [roomData?.questionIndex, roomData?.status, roomData?.phase, appState, mpDurationMs, appId, roomCode, user?.uid]);
+  }, [roomData?.questionIndex, roomData?.status, roomData?.phase, appState, mpQuestionMs, appId, roomCode, user?.uid]);
 
   // Host drives the pacing: once every player has answered the current question, wait 2 seconds
   // (so the last answerer sees the reveal) and then flip the whole room to the scoreboard. Armed
@@ -351,21 +448,28 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     if (!roomData) return;
     const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     const source: RoomSource = roomData.source || 'revelation';
-    const count = roomData.verseCount || mpVerseCount;
+    const count = roomData.verseCount || mpVerseCount;  // buildMpQuestionPool caps this at the chapter's size
 
     let questions: RoomQuestion[] = [];
     if (source === 'quiz') {
       const quiz = hostableQuizzes.find((q) => q.id === roomData.quizId);
-      if (!quiz) return alert('Pick a quiz to play first.');
+      if (!quiz) return setMpError('Pick a quiz to play first.');
       questions = quizToRoomQuestions(quiz);
+    } else if (source === 'class') {
+      const classQuiz = CLASS_QUIZZES.find((q) => q.id === roomData.classQuizId) || CLASS_QUIZZES[0];
+      if (!classQuiz) return setMpError('Pick a class quiz first.');
+      questions = buildClassQuizPool(classQuiz);
     } else if (source === 'revelation') {
       questions = buildMpQuestionPool(roomData.chapterId || 'rev1', count);
     } else {
-      if (!bibleData) return alert('Scripture is still loading — try again in a moment.');
-      const books = booksForSource(bibleData, source);
+      if (!bibleData) return setMpError('Scripture is still loading. Try again in a moment.');
+      const libraryBooks = booksForSource(bibleData, source);
+      // Host may narrow the library to a single book; ignore a stale pick from another library.
+      const books = roomData.book && libraryBooks.includes(roomData.book) ? [roomData.book] : libraryBooks;
       questions = buildLibraryPool(bibleData, books, (roomData.libraryMode as LibraryMode) || 'blanks', count);
     }
-    if (!questions.length) return alert('That round has no questions.');
+    if (!questions.length) return setMpError('That round has no questions.');
+    setMpError(null);
 
     await updateDoc(sessionRef, { status: 'playing', questionIndex: 0, phase: 'question', totalQuestions: questions.length, questions });
   };
@@ -373,16 +477,24 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
   // What the room plays: a Bible library, one of the host's quizzes, or Revelation's authored set.
   const mpSelectSource = async (source: RoomSource) => {
     const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
-    const patch: Record<string, unknown> = { source };
+    const patch: Record<string, unknown> = { source, book: '' };
     // Default the dependent pick so "Start" is never a dead end.
     if (source === 'quiz' && !roomData?.quizId && hostableQuizzes[0]) {
       patch.quizId = hostableQuizzes[0].id;
       patch.quizName = hostableQuizzes[0].name;
     }
-    if (source !== 'quiz' && source !== 'revelation' && !roomData?.libraryMode) {
+    if (source === 'class' && !roomData?.classQuizId && CLASS_QUIZZES[0]) {
+      patch.classQuizId = CLASS_QUIZZES[0].id;
+    }
+    if (source !== 'quiz' && source !== 'revelation' && source !== 'class' && !roomData?.libraryMode) {
       patch.libraryMode = 'blanks';
     }
     await updateDoc(sessionRef, patch);
+  };
+
+  const mpSelectBook = async (book: string) => {
+    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    await updateDoc(sessionRef, { book });
   };
 
   const mpSelectLibraryMode = async (mode: LibraryMode) => {
@@ -394,6 +506,11 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     const quiz = hostableQuizzes.find((q) => q.id === quizId);
     const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     await updateDoc(sessionRef, { quizId, quizName: quiz?.name ?? '' });
+  };
+
+  const mpSelectClassQuiz = async (classQuizId: string) => {
+    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    await updateDoc(sessionRef, { classQuizId });
   };
 
   const mpSelectVerseCount = async (count: number) => {
@@ -423,7 +540,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     setMpFeedback(isCorrect ? 'correct' : 'incorrect');
 
     // Faster answers keep more of the speed bonus; correct-but-slow still earns the base.
-    const fraction = mpDurationMs > 0 ? Math.max(0, Math.min(1, mpTimeLeft / mpDurationMs)) : 0;
+    const fraction = mpQuestionMs > 0 ? Math.max(0, Math.min(1, mpTimeLeft / mpQuestionMs)) : 0;
     const gained = isCorrect ? MP_BASE_POINTS + Math.round(MP_SPEED_BONUS * fraction) : 0;
     setMpLastGain(gained);
 
@@ -502,13 +619,13 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
     const safeBuilder = churchData.builder && churchData.builder.length ? churchData.builder : [{ verse: "?", chunks: ["No", "data"] }];
 
     if (mode === 'blanks') setActiveQuestions(shuffleArray(safeBlanks.map((q: any) => {
-      const distractors = shuffleArray((q.options || []).filter((opt: any) => opt !== q.blank)).slice(0, Math.max(1, optionCount - 1));
+      const distractors = blankDistractors(q, Math.max(1, optionCount - 1));
       return { ...q, options: shuffleArray([q.blank, ...distractors]) };
     })));
     else if (mode === 'builder') { setActiveQuestions([...safeBuilder]); initializeBuilderLevel(0, safeBuilder); }
     else if (mode === 'guess_verse') setActiveQuestions(shuffleArray(safeBlanks.map((q: any) => {
-      const decoys = shuffleArray(["1:1", "2:2", "3:3", "4:4", "5:5", "6:6"].filter((d) => d !== q.verse)).slice(0, Math.max(1, optionCount - 1));
-      return { text: q.textBefore + " " + q.blank + " " + q.textAfter, correct: q.verse, options: shuffleArray([q.verse, ...decoys]) };
+      const decoys = referenceDecoys(q.verse, Math.max(1, optionCount - 1));
+      return { text: joinVerse(q.textBefore || '', q.blank, q.textAfter || ''), correct: q.verse, options: shuffleArray([q.verse, ...decoys]) };
     })));
   };
 
@@ -530,20 +647,32 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
       }, 1500);
     } else {
       setFeedback('incorrect'); setStreak(0); setMissedCurrent(true);
-      setTimeout(() => { if (gameMode !== 'blanks') { if (currentLevel < activeQuestions.length - 1) { setCurrentLevel(currentLevel + 1); setFeedback(null); setMissedCurrent(false); } else setAppState('finished'); } else setFeedback(null); }, 2000);
+      // A miss shows the answer, then moves on. No free retry; the question scores 0.
+      setTimeout(() => {
+        if (currentLevel < activeQuestions.length - 1) {
+          setCurrentLevel(currentLevel + 1); setFeedback(null); setMissedCurrent(false);
+          if (gameMode === 'builder') initializeBuilderLevel(currentLevel + 1, activeQuestions);
+        } else setAppState('finished');
+      }, gameMode === 'builder' ? 3200 : 2000);
     }
   };
 
-  const handleBuilderClick = (chunk: any) => {
+  // Moves the tapped chunk (by position, so repeated chunks are handled one at a time) into the line.
+  // Nothing is submitted until the player taps Confirm, so the reorder arrows are usable.
+  const handleBuilderClick = (index: number) => {
     if (feedback) return;
-    const newSelected = [...builderData.selected, chunk];
-    const newScrambled = builderData.scrambled.filter(c => c !== chunk);
-    setBuilderData({ ...builderData, selected: newSelected, scrambled: newScrambled });
+    const chunk = builderData.scrambled[index];
+    if (chunk === undefined) return;
+    setBuilderData({
+      ...builderData,
+      selected: [...builderData.selected, chunk],
+      scrambled: builderData.scrambled.filter((_, i) => i !== index),
+    });
+  };
 
-    if (newScrambled.length === 0) {
-      const isCorrect = newSelected.join(" ") === builderData.target.join(" ");
-      handleSinglePlayerAnswer(isCorrect);
-    }
+  const handleBuilderConfirm = () => {
+    if (feedback || builderData.scrambled.length > 0 || builderData.selected.length === 0) return;
+    handleSinglePlayerAnswer(builderData.selected.join(' ') === builderData.target.join(' '));
   };
 
   const handleBuilderUndo = () => {
@@ -590,7 +719,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
           <>
             <p className="text-sm text-ash-500">Enter your name to open a room. You'll get a code to share with your group.</p>
             <input type="text" placeholder="Your Name" value={playerName} autoFocus onChange={e => setPlayerName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && playerName) createSession(); }} className="w-full rounded-2xl border border-gold-500/20 bg-soot-900/70 p-4 text-center text-white outline-none transition-colors focus:border-gold-400" />
-            <button onClick={createSession} disabled={!playerName} className="btn-primary w-full rounded-2xl p-4 font-black uppercase tracking-[0.2em] disabled:opacity-50">Create Room</button>
+            <button onClick={createSession} disabled={!playerName || mpBusy !== null} className="btn-primary w-full rounded-2xl p-4 font-black uppercase tracking-[0.2em] disabled:opacity-50">{mpBusy === 'create' ? 'Creating…' : 'Create Room'}</button>
           </>
         )}
 
@@ -600,12 +729,14 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
             <p className="text-sm text-ash-500">Enter your name and the 4-letter code from your host.</p>
             <input type="text" placeholder="Your Name" value={playerName} autoFocus onChange={e => setPlayerName(e.target.value)} className="w-full rounded-2xl border border-gold-500/20 bg-soot-900/70 p-4 text-center text-white outline-none transition-colors focus:border-gold-400" />
             <input type="text" placeholder="CODE" value={roomCode} onChange={e => setRoomCode(e.target.value.toUpperCase())} onKeyDown={(e) => { if (e.key === 'Enter' && playerName && roomCode.length === 4) joinSession(); }} className="w-full rounded-2xl border border-gold-500/20 bg-neutral-950 p-4 text-center uppercase tracking-[0.45em] text-white outline-none focus:border-gold-400" maxLength={4} />
-            <button onClick={joinSession} disabled={!playerName || roomCode.length !== 4} className="w-full rounded-2xl border border-gold-500/30 bg-gold-700/20 p-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-gold-700/25 disabled:opacity-50">Join Room</button>
+            <button onClick={joinSession} disabled={!playerName || roomCode.length !== 4 || mpBusy !== null} className="w-full rounded-2xl border border-gold-500/30 bg-gold-700/20 p-4 font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-gold-700/25 disabled:opacity-50">{mpBusy === 'join' ? 'Joining…' : 'Join Room'}</button>
           </>
         )}
 
+        {mpError && lobbyChoice !== 'menu' && <div role="alert" className="rounded-xl border border-red-500/40 bg-red-950/30 p-3 text-sm text-red-200">{mpError}</div>}
         <button
           onClick={() => {
+            setMpError(null);
             if (lobbyChoice !== 'menu') { setLobbyChoice('menu'); return; }
             if (lobbyReturnToMainMenu) onBack(); else setAppState('actSelect');
           }}
@@ -627,8 +758,17 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
             <div className="space-y-2"><h3 className="text-ash-500 text-sm uppercase tracking-widest">Players Joined</h3><div className="flex flex-wrap gap-2 justify-center">{(Object.values(roomData.players || {}) as any[]).map((p: any, i: any) => (<span key={i} className="px-3 py-1 rounded-full border border-iron-800 bg-soot-900/50 text-white text-sm">{p.name}</span>))}</div></div>
             {isHost ? (() => {
               const source: RoomSource = roomData.source || 'revelation';
-              const isLibrary = source !== 'revelation' && source !== 'quiz';
-              const contentOptions: RoomSource[] = ['revelation', 'old_testament', 'new_testament', 'gospels', 'alpha_omega', ...(hostableQuizzes.length ? (['quiz'] as RoomSource[]) : [])];
+              const isLibrary = source !== 'revelation' && source !== 'quiz' && source !== 'class';
+              const libraryBooks = isLibrary && bibleData ? booksForSource(bibleData, source) : [];
+              const pickedBook: string = isLibrary && roomData.book && libraryBooks.includes(roomData.book) ? roomData.book : '';
+              const pickedBookVerses = pickedBook && bibleData
+                ? Object.values(bibleData[pickedBook]).reduce((n: number, ch: any) => n + Object.keys(ch).length, 0)
+                : Infinity;
+              const sliderMax = source === 'revelation'
+                ? Math.max(1, Math.min(MP_MAX_VERSES, chapterVerseCount(roomData.chapterId || 'rev1')))
+                : Math.max(1, Math.min(MP_MAX_VERSES, pickedBookVerses));
+              const sliderValue = Math.min(mpVerseCount, sliderMax);
+              const contentOptions: RoomSource[] = ['revelation', 'old_testament', 'new_testament', 'gospels', 'alpha_omega', ...(CLASS_QUIZZES.length ? (['class'] as RoomSource[]) : []), ...(hostableQuizzes.length ? (['quiz'] as RoomSource[]) : [])];
               return (<div className="space-y-4">
               {/* What the room plays: any Bible library, one of the host's quizzes, or Revelation. */}
               <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
@@ -662,8 +802,32 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 </div>
               )}
 
+              {source === 'class' && (() => {
+                const picked = CLASS_QUIZZES.find((q) => q.id === roomData.classQuizId) || CLASS_QUIZZES[0];
+                const builders = picked.questions.filter((q) => q.kind === 'builder').length;
+                return (
+                  <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
+                    <label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Select Class Quiz</label>
+                    <select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectClassQuiz(e.target.value)} value={picked.id}>
+                      {CLASS_QUIZZES.map((q) => <option key={q.id} value={q.id}>{q.name} ({q.questions.length})</option>)}
+                    </select>
+                    <div className="mt-2 text-[11px] text-ash-600">{picked.questions.length - builders} fill in the blanks and {builders} verse builders, in passage order. Verse builders get extra time.</div>
+                  </div>
+                );
+              })()}
+
               {source === 'revelation' && (
                 <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4"><label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div>
+              )}
+
+              {isLibrary && libraryBooks.length > 1 && (
+                <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
+                  <label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Book</label>
+                  <select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectBook(e.target.value)} value={pickedBook}>
+                    <option value="">All books in {ROOM_SOURCE_LABELS[source]}</option>
+                    {libraryBooks.map((b) => <option key={b} value={b}>{b}</option>)}
+                  </select>
+                </div>
               )}
 
               {isLibrary && (
@@ -677,7 +841,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                       );
                     })}
                   </div>
-                  <div className="mt-2 text-[11px] text-ash-600">{(roomData.libraryMode || 'blanks') === 'reference' ? 'Read a verse and name its reference.' : 'Fill the missing word in each verse.'} Verses are drawn at random.{!bibleData && ' Loading Scripture…'}</div>
+                  <div className="mt-2 text-[11px] text-ash-600">{(roomData.libraryMode || 'blanks') === 'reference' ? 'Read a verse and name its reference.' : 'Fill the missing word in each verse.'} Verses are drawn at random{pickedBook ? ` from ${pickedBook}` : ''}.{!bibleData && ' Loading Scripture…'}</div>
                 </div>
               )}
               <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
@@ -695,30 +859,32 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                 </div>
                 <div className="mt-2 text-[11px] text-ash-600">Answer faster to earn more points — up to {MP_BASE_POINTS + MP_SPEED_BONUS} per question.</div>
               </div>
-              <div className={`text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4 ${source === 'quiz' ? 'hidden' : ''}`}>
+              <div className={`text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4 ${source === 'quiz' || source === 'class' ? 'hidden' : ''}`}>
                 <div className="mb-2 flex items-center justify-between">
                   <label className="text-xs text-ash-500 uppercase tracking-[0.2em]">Verses to Play</label>
-                  <span className="rounded-lg border border-gold-500/30 bg-gold-700/15 px-3 py-1 text-sm font-black text-gold-300">{mpVerseCount}</span>
+                  <span className="rounded-lg border border-gold-500/30 bg-gold-700/15 px-3 py-1 text-sm font-black text-gold-300">{sliderValue}</span>
                 </div>
                 <input
                   type="range"
                   min={1}
-                  max={MP_MAX_VERSES}
-                  value={mpVerseCount}
+                  max={sliderMax}
+                  value={sliderValue}
                   onChange={(e) => setMpVerseCount(Number(e.target.value))}
-                  onMouseUp={() => mpSelectVerseCount(mpVerseCount)}
-                  onTouchEnd={() => mpSelectVerseCount(mpVerseCount)}
-                  onKeyUp={() => mpSelectVerseCount(mpVerseCount)}
+                  onMouseUp={() => mpSelectVerseCount(sliderValue)}
+                  onTouchEnd={() => mpSelectVerseCount(sliderValue)}
+                  onKeyUp={() => mpSelectVerseCount(sliderValue)}
                   className="w-full accent-gold-500"
                 />
-                <div className="mt-1 flex justify-between text-[10px] text-ash-600"><span>1</span><span>{MP_MAX_VERSES}</span></div>
+                <div className="mt-1 flex justify-between text-[10px] text-ash-600"><span>1</span><span>{sliderMax}</span></div>
               </div>
+              {mpError && <div role="alert" className="rounded-xl border border-red-500/40 bg-red-950/30 p-3 text-sm text-red-200">{mpError}</div>}
               <button onClick={mpStartGame} className="btn-primary w-full rounded-2xl py-4 font-black uppercase tracking-[0.2em]">Start Game</button></div>);
             })() : (<div className="space-y-3"><div className="flex items-center justify-center gap-2 text-gold-400 animate-pulse"><Radio size={16} /> Waiting for Host...</div><div className="text-xs text-ash-600 uppercase tracking-[0.2em]">Speed: {SPEED_SETTINGS[(roomData.speed as SpeedKey) || 'fast'].label} · {(() => {
               const s: RoomSource = roomData.source || 'revelation';
               if (s === 'quiz') return roomData.quizName || 'Custom quiz';
+              if (s === 'class') return (CLASS_QUIZZES.find((q) => q.id === roomData.classQuizId) || CLASS_QUIZZES[0])?.name || 'Class quiz';
               if (s === 'revelation') return `Revelation · ${roomData.verseCount || 10} verses`;
-              return `${ROOM_SOURCE_LABELS[s]} · ${(roomData.libraryMode || 'blanks') === 'reference' ? 'Reference' : 'Fill Blanks'}`;
+              return `${ROOM_SOURCE_LABELS[s]}${roomData.book ? ` (${roomData.book})` : ''} · ${(roomData.libraryMode || 'blanks') === 'reference' ? 'Reference' : 'Fill Blanks'}`;
             })()}</div></div>)}
           </div>
         </div>
@@ -769,7 +935,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
         <div className="w-full max-w-3xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
           <div className="flex justify-between items-center mb-4"><span className="text-gold-400 font-mono text-xs uppercase bg-gold-700/15 px-3 py-1 rounded-full border border-gold-700/40">Question {idx + 1} / {total}</span><span className="text-xs font-mono text-ash-600 uppercase tracking-[0.2em]">{answeredCount}/{players.length} answered</span></div>
           {(() => {
-            const pct = mpDurationMs > 0 ? Math.max(0, Math.min(100, (mpTimeLeft / mpDurationMs) * 100)) : 0;
+            const pct = mpQuestionMs > 0 ? Math.max(0, Math.min(100, (mpTimeLeft / mpQuestionMs) * 100)) : 0;
             const seconds = Math.ceil(mpTimeLeft / 1000);
             const urgent = pct <= 30;
             return (
@@ -786,11 +952,83 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
           })()}
           <div className="mb-10">
             {currentQ.verse && <div className="mb-3 text-sm font-black uppercase tracking-widest text-gold-400">{currentQ.verse}</div>}
-            <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed">{currentQ.prompt}</div>
+            {currentQ.kind === 'multi' ? (
+              <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-loose">
+                {String(currentQ.prompt).split('_____').map((part: string, i: number, arr: string[]) => {
+                  if (i === arr.length - 1) return <span key={i}>{part}</span>;
+                  const placed = mpSlots[i];
+                  const word = placed === null || placed === undefined ? '' : currentQ.options[placed];
+                  const right = currentQ.answers[i];
+                  const answered = mpFeedback !== null;
+                  const ok = answered && word === right;
+                  return (
+                    <span key={i}>
+                      {part}
+                      <button type="button" disabled={answered || !word} onClick={() => setMpSlots(mpSlots.map((v, j) => (j === i ? null : v)))} className={`mx-1 inline-block min-w-[5.5rem] rounded-lg border-b-2 px-2 align-baseline font-sans text-lg font-bold ${answered ? (ok ? 'border-green-500 bg-green-500/15 text-green-200' : 'border-red-500 bg-red-500/15 text-red-200') : word ? 'border-gold-500 bg-gold-500/15 text-gold-100' : 'border-ash-600 bg-soot-950/60 text-ash-600'}`}>
+                        {answered && !ok ? <><span className="line-through opacity-60">{word || '—'}</span> <span className="text-green-300">{right}</span></> : word || <span className="text-sm">{i + 1}</span>}
+                      </button>
+                    </span>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed">{currentQ.prompt}</div>
+            )}
           </div>
           {mpFeedback && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${mpFeedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{mpFeedback === 'correct' ? `Correct +${mpLastGain}` : 'Wrong'}</div>}
           {mpFeedback && currentQ.explanation && <div className="mb-6 text-sm text-ash-400">{currentQ.explanation}</div>}
+          {currentQ.kind === 'multi' ? (() => {
+            const filled = mpSlots.length > 0 && mpSlots.every((v) => v !== null);
+            if (mpFeedback !== null) return <div className="mb-6" />;
+            return (
+              <div className="mb-6 space-y-4">
+                <div className="text-[11px] font-black uppercase tracking-[0.2em] text-ash-600">Tap words to fill the blanks in order. Tap a blank to clear it.</div>
+                <div className="flex flex-wrap justify-center gap-2">
+                  {(currentQ.options || []).map((opt: string, oi: number) => mpSlots.includes(oi) ? null : (
+                    <button key={oi} type="button" onClick={() => { const at = mpSlots.indexOf(null); if (at >= 0) setMpSlots(mpSlots.map((v, j) => (j === at ? oi : v))); }} className="rounded-xl border border-gold-500/20 bg-neutral-800 px-4 py-3 font-medium text-ash-200 transition-all hover:border-gold-500 active:scale-95">{opt}</button>
+                  ))}
+                </div>
+                <div className="flex justify-center gap-3">
+                  <button type="button" onClick={() => setMpSlots(mpSlots.map(() => null))} disabled={mpSlots.every((v) => v === null)} className="rounded-2xl border border-iron-800 px-4 py-3 text-xs font-black uppercase tracking-[0.2em] text-ash-400 disabled:opacity-40">Clear</button>
+                  <button type="button" onClick={() => mpSubmitAnswer(mpSlots.map((v) => (v === null ? '' : currentQ.options[v])).join(MULTI_BLANK_SEPARATOR))} disabled={!filled} className="btn-primary rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.2em] disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
+                </div>
+              </div>
+            );
+          })() : currentQ.kind === 'builder' ? (() => {
+            const chunks: string[] = currentQ.chunks || [];
+            const done = mpPlaced.length === chunks.length;
+            return (
+              <div className="mb-6 space-y-4">
+                <div className="min-h-[96px] flex flex-wrap content-start justify-center gap-2 rounded-2xl border-2 border-dashed border-iron-800 bg-soot-950/40 p-3">
+                  {mpPlaced.length === 0 && <span className="self-center text-sm text-ash-600">Tap the pieces in order</span>}
+                  {mpPlaced.map((ci, i) => (
+                    <button key={ci} type="button" disabled={mpFeedback !== null} onClick={() => setMpPlaced(mpPlaced.filter((_, j) => j !== i))} className="rounded-lg border border-gold-500/30 bg-gold-500/15 px-3 py-2 font-medium text-gold-100">{chunks[ci]}</button>
+                  ))}
+                </div>
+                {mpFeedback === null && (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    {chunks.map((c, ci) => mpPlaced.includes(ci) ? null : (
+                      <button key={ci} type="button" onClick={() => setMpPlaced([...mpPlaced, ci])} className="rounded-xl border border-gold-500/20 bg-neutral-800 px-4 py-3 font-medium text-ash-200 transition-all hover:border-gold-500 active:scale-95">{c}</button>
+                    ))}
+                  </div>
+                )}
+                {mpFeedback === null && (
+                  <div className="flex justify-center gap-3">
+                    <button type="button" onClick={() => setMpPlaced([])} disabled={mpPlaced.length === 0} className="rounded-2xl border border-iron-800 px-4 py-3 text-xs font-black uppercase tracking-[0.2em] text-ash-400 disabled:opacity-40">Clear</button>
+                    <button type="button" onClick={() => mpSubmitAnswer(mpPlaced.map((ci) => chunks[ci]).join(' '))} disabled={!done} className="btn-primary rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.2em] disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
+                  </div>
+                )}
+                {mpFeedback === 'incorrect' && (
+                  <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4">
+                    <div className="mb-1 text-[11px] font-black uppercase tracking-[0.2em] text-green-300">Correct order</div>
+                    <div className="font-serif text-lg text-ash-200">{currentQ.blank}</div>
+                  </div>
+                )}
+              </div>
+            );
+          })() : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">{(currentQ.options || []).map((opt: any, i: any) => (<button key={i} onClick={() => mpSubmitAnswer(opt)} disabled={mpFeedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${mpFeedback === 'correct' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white' : mpFeedback === 'incorrect' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>))}</div>
+          )}
           {mpFeedback ? (
             <div className="text-xs text-ash-600 uppercase tracking-[0.2em]">Scoreboard when everyone's in…</div>
           ) : (
@@ -809,8 +1047,10 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
           <div className="rounded-[1.5rem] border border-iron-800/60 bg-gradient-to-b from-gold-700/12 via-soot-950/50 to-soot-900/80 p-8 space-y-6">
             <Trophy className="w-16 h-16 text-yellow-400 mx-auto animate-bounce" /><h2 className="text-3xl font-black text-white">Final Standings</h2>
             <div className="space-y-2">{sortedPlayers.map(([pid, p]: any, i: any) => (<div key={pid} className={`flex justify-between items-center p-3 rounded-xl ${i===0 ? 'bg-yellow-500/20 border border-yellow-500/50' : 'border border-iron-800 bg-soot-900/50'}`}><div className="flex items-center gap-3"><span className="font-mono font-bold text-ash-500">#{i+1}</span><span className="font-bold text-white">{p.name}</span></div><span className="font-mono text-white">{p.score}</span></div>))}</div>
-            <button onClick={mpReturnToRoom} className="btn-primary w-full rounded-2xl py-3 font-black uppercase tracking-[0.2em]">Back to Room</button>
-            <button onClick={() => { if (lobbyReturnToMainMenu) onBack(); else setAppState('actSelect'); }} className="text-sm text-ash-600 transition-colors hover:text-white">Leave group</button>
+            {isHost
+              ? <button onClick={mpReturnToRoom} className="btn-primary w-full rounded-2xl py-3 font-black uppercase tracking-[0.2em]">Back to Room</button>
+              : <div className="flex items-center justify-center gap-2 text-sm text-gold-400 animate-pulse"><Radio size={14} /> Waiting for the host to start another round…</div>}
+            <button onClick={leaveRoom} className="text-sm text-ash-600 transition-colors hover:text-white">Leave group</button>
           </div>
         </div>
       );
@@ -837,7 +1077,7 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
           </div>
         </div>
         <div className="flex items-center gap-4">
-          {appState === 'playing' && (<div className="flex gap-4 text-sm font-mono"><div className="flex items-center gap-1 text-gold-400"><Award size={14}/> {score}</div><div className="flex items-center gap-1 text-ash-500"><AlertTriangle size={14}/> {streak}x</div></div>)}
+          {appState === 'playing' && (<div className="flex gap-4 text-sm font-mono"><div className="flex items-center gap-1 text-gold-400"><Award size={14}/> {score}</div><div className={`flex items-center gap-1 ${streak > 0 ? 'text-ember-400' : 'text-ash-600'}`} title="Streak"><Flame size={14}/> x{streak}</div></div>)}
           {appState !== 'actSelect' && appState !== 'multiplayer_room' && (<button onClick={() => { if (lobbyReturnToMainMenu && appState === 'lobby') onBack(); else setAppState('actSelect'); }} className="p-2 bg-soot-900/70 border border-iron-800 rounded-full hover:bg-iron-800/40 transition-colors" title="Back to Library"><Home size={16} /></button>)}
         </div>
       </div>
@@ -967,14 +1207,14 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
 
         {appState === 'playing' && (
            <div className="w-full flex flex-col items-center animate-in fade-in duration-500">
-              <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-gold-500 transition-all duration-500 ease-out" style={{ width: `${((currentLevel) / activeQuestions.length) * 100}%` }}></div></div>
+              <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-gold-500 transition-all duration-500 ease-out" style={{ width: `${((currentLevel + (feedback ? 1 : 0)) / Math.max(activeQuestions.length, 1)) * 100}%` }}></div></div>
               {gameMode === 'blanks' && (
                 <div className="w-full max-w-3xl rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
                   <div className="rounded-2xl border border-iron-800/60 bg-soot-900/70 p-6 sm:p-8 relative overflow-hidden text-center">
                     <div className="mb-8"><span className="text-gold-400 font-mono text-xs uppercase tracking-widest bg-gold-700/15 px-3 py-1 rounded-full border border-gold-700/40">Rev {activeQuestions[currentLevel].verse}</span></div>
                     <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">{activeQuestions[currentLevel].textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold ${feedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : feedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-gold-500/50 text-transparent min-w-[80px]'}`}>{feedback === 'correct' || feedback === 'incorrect' ? activeQuestions[currentLevel].blank : '_____'}</span> {activeQuestions[currentLevel].textAfter}</div>
                     {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: any, i: any) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].blank)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>))}</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: any, i: any) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].blank)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>))}</div>
                   </div>
                 </div>
               )}
@@ -983,18 +1223,27 @@ const RevelationGame = ({ onBack, user, authLoading, isMember, initialAppState =
                   <div className="mb-8"><span className="text-purple-400 font-mono text-xs uppercase tracking-widest bg-purple-950/30 px-3 py-1 rounded-full border border-purple-900/50">Identify Reference</span></div>
                   <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">"{activeQuestions[currentLevel].text}"</div>
                   {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
-                  <div className="grid grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: string, i: number) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].correct)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-mono font-bold border-2 ${feedback === 'correct' && opt === activeQuestions[currentLevel].correct ? 'bg-green-600 border-green-500' : 'bg-neutral-800 border-neutral-700 hover:border-purple-500'}`}>Rev {opt}</button>))}</div>
+                  <div className="grid grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: string, i: number) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].correct)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-mono font-bold border-2 ${feedback && opt === activeQuestions[currentLevel].correct ? 'bg-green-600 border-green-500' : 'bg-neutral-800 border-neutral-700 hover:border-purple-500'}`}>Rev {opt}</button>))}</div>
                 </div>
               )}
               {gameMode === 'builder' && (
                 <div className="w-full max-w-3xl flex flex-col items-center">
                   <div className="w-full bg-neutral-900 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-neutral-700 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
-                    {builderData.selected.map((chunk, i) => (<div key={i} className="inline-flex items-center gap-1 rounded-lg border border-gold-500/30 bg-gold-500/15 px-2 py-2 text-soot-950 shadow-lg animate-in zoom-in duration-200"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderData.selected.length - 1} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>))}
+                    {builderData.selected.map((chunk, i) => (<div key={i} className="inline-flex items-center gap-1 rounded-lg border border-gold-500/30 bg-gold-500/15 px-2 py-2 text-gold-100 shadow-lg animate-in zoom-in duration-200"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderData.selected.length - 1} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>))}
                     {builderData.selected.length > 0 && !feedback && (<button onClick={handleBuilderUndo} className="absolute bottom-4 right-4 text-xs text-ash-500 hover:text-white underline">Undo Last</button>)}
                   </div>
                   {feedbackLabel && <div className={`mb-4 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
+                  {feedback === 'incorrect' && (
+                    <div role="status" className="mb-6 w-full rounded-2xl border border-green-600/40 bg-green-900/20 p-4 text-left">
+                      <div className="mb-1 text-[11px] font-black uppercase tracking-[0.25em] text-green-400">Correct order</div>
+                      <div className="font-serif text-lg text-ash-200">{builderData.target.join(' ')}</div>
+                    </div>
+                  )}
                   <div className="mb-3 text-xs font-black uppercase tracking-[0.3em] text-ash-600">Tap words below, then reorder the placed line</div>
-                  <div className="flex flex-wrap justify-center gap-3">{builderData.scrambled.map((chunk, i) => (<button key={i} onClick={() => handleBuilderClick(chunk)} disabled={feedback !== null} className="border border-gold-500/20 bg-neutral-800 px-4 py-3 rounded-xl font-medium text-ash-200 shadow-md transition-all hover:border-gold-500 hover:bg-neutral-700 active:scale-95">{chunk}</button>))}</div>
+                  <div className="mb-4">
+                    <button onClick={handleBuilderConfirm} disabled={feedback !== null || builderData.scrambled.length > 0 || builderData.selected.length === 0} className="btn-primary rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.2em] disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-3">{builderData.scrambled.map((chunk, i) => (<button key={i} onClick={() => handleBuilderClick(i)} disabled={feedback !== null} className="border border-gold-500/20 bg-neutral-800 px-4 py-3 rounded-xl font-medium text-ash-200 shadow-md transition-all hover:border-gold-500 hover:bg-neutral-700 active:scale-95">{chunk}</button>))}</div>
                 </div>
               )}
            </div>

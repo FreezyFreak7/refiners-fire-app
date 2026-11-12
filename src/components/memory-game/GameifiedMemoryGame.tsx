@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle,
   ArrowLeft,
   Award,
   BookOpen,
@@ -12,6 +11,7 @@ import {
   Search,
 } from 'lucide-react';
 import { loadBible, type BibleData } from '../../utils/bible';
+import { buildWordPool, cleanWord, pickBlankIndexes, pickDistractors } from '../../utils/blanks';
 import { sectionsFor, type LibrarySection } from '../../data/libraries';
 
 interface MemoryGameProps {
@@ -40,7 +40,8 @@ type BlanksQuestion = {
   verse: VerseRecord;
   promptWords: string[];
   answers: string[];
-  options: string[];
+  /** Wrong options per blank (same order as `answers`), already in each answer's capitalisation. */
+  options: string[][];
 };
 
 type BuilderQuestion = {
@@ -258,61 +259,28 @@ const normalizeVerseRef = (raw: string) => {
   return `${normalizedBook} ${rest}`;
 };
 
-const createBlankedQuestion = (verse: VerseRecord, targetBlanks: number): BlanksQuestion => {
+// Most wrong options any level shows (Sealed shows 6 buttons = answer + 5).
+const MAX_DISTRACTORS = 5;
+
+const createBlankedQuestion = (verse: VerseRecord, targetBlanks: number, wordPool: string[]): BlanksQuestion => {
   const words = verse.text.replace(/\s+/g, ' ').trim().split(' ');
-  const meaningfulIndexes = words
-    .map((word, index) => ({
-      index,
-      clean: word.replace(/[^A-Za-z']/g, ''),
-    }))
-    .filter(({ clean }) => clean.length >= 4);
+  const orderedIndexes = pickBlankIndexes(words, Math.max(1, targetBlanks));
+  const answers = orderedIndexes.map((index) => cleanWord(words[index] ?? '')).filter(Boolean);
 
-  const blankCount = Math.max(1, Math.min(targetBlanks, meaningfulIndexes.length || 1));
-
-  const selectedIndexes = meaningfulIndexes
-    .filter(({ index }) => index > 0 && index < words.length - 1)
-    .sort((a, b) => b.clean.length - a.clean.length)
-    .reduce<number[]>((acc, item) => {
-      if (acc.length >= blankCount) return acc;
-      if (acc.some((existing) => Math.abs(existing - item.index) <= 1)) return acc;
-      acc.push(item.index);
-      return acc;
-    }, []);
-
-  if (!selectedIndexes.length && words.length) {
-    selectedIndexes.push(Math.min(2, Math.max(words.length - 1, 0)));
-  }
-
-  const orderedIndexes = [...selectedIndexes].sort((a, b) => a - b);
-  const answers = orderedIndexes
-    .map((index) => words[index]?.replace(/[^A-Za-z']/g, '') || '')
-    .filter(Boolean);
+  // Keep any punctuation glued to a blanked word ("world." -> "_____ 1."), so the filled-in
+  // verse still reads correctly.
   const promptWords = [...words];
   orderedIndexes.forEach((index, answerIndex) => {
-    promptWords[index] = `_____ ${answerIndex + 1}`;
+    const word = words[index] ?? '';
+    const clean = cleanWord(word);
+    const at = clean ? word.indexOf(clean) : -1;
+    promptWords[index] = at >= 0
+      ? `${word.slice(0, at)}_____ ${answerIndex + 1}${word.slice(at + clean.length)}`
+      : `_____ ${answerIndex + 1}`;
   });
 
-  const distractors = shuffleArray(
-    words
-      .map((word) => word.replace(/[^A-Za-z']/g, ''))
-      .filter(
-        (word) =>
-          word.length >= 4 &&
-          !answers.some((answer) => answer.toLowerCase() === word.toLowerCase())
-      )
-  );
-
-  while (distractors.length < 12) {
-    distractors.push(['faith', 'truth', 'glory', 'spirit', 'kingdom', 'mercy'][distractors.length % 6]);
-  }
-
-  return {
-    kind: 'blanks',
-    verse,
-    promptWords,
-    answers,
-    options: distractors,
-  };
+  const options = answers.map((answer) => pickDistractors(answer, verse.text, wordPool, MAX_DISTRACTORS));
+  return { kind: 'blanks', verse, promptWords, answers, options };
 };
 
 const createBuilderQuestion = (verse: VerseRecord, wordsPerChunk: number): BuilderQuestion => {
@@ -373,6 +341,8 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
   const [bestStreak, setBestStreak] = useState(0);
   const [missedCurrent, setMissedCurrent] = useState(false);
   const [feedback, setFeedback] = useState<'correct' | 'incorrect' | null>(null);
+  // The option the player just tapped, so a wrong pick can be shown in red next to the right one.
+  const [picked, setPicked] = useState<string | null>(null);
   const [blankGuesses, setBlankGuesses] = useState<string[]>([]);
   const [builderState, setBuilderState] = useState<BuilderState>({ target: [], scrambled: [], selected: [] });
 
@@ -588,10 +558,13 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
     if (!versePool.length) return;
 
+    // Wrong options come from the other verses in the round, so they're real Scripture words but
+    // never ones visible in the verse being played.
+    const wordPool = buildWordPool(versePool.map((v) => v.text));
     const questions: Question[] = versePool.map((verse) => {
       switch (mode) {
         case 'blanks':
-          return createBlankedQuestion(verse, cfg.blanks);
+          return createBlankedQuestion(verse, cfg.blanks, wordPool);
         case 'builder':
           return createBuilderQuestion(verse, cfg.wordsPerChunk);
         case 'reference':
@@ -608,6 +581,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     setBestStreak(0);
     setMissedCurrent(false);
     setFeedback(null);
+    setPicked(null);
     setBlankGuesses([]);
     setAppState('playing');
     if (mode === 'builder' && questions[0]?.kind === 'builder') initializeBuilder(questions[0]);
@@ -621,10 +595,20 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     }
     setCurrentLevel(nextIndex);
     setFeedback(null);
+    setPicked(null);
     setBlankGuesses([]);
     setMissedCurrent(false);
     const nextQuestion = activeQuestions[nextIndex];
     if (nextQuestion?.kind === 'builder') initializeBuilder(nextQuestion);
+  };
+
+  // Points and streak for a whole verse/question. A verse with any miss scores nothing.
+  const awardCorrect = () => {
+    setScore((prev) => prev + 10 + streak * 2);
+    const nextStreak = streak + 1;
+    setStreak(nextStreak);
+    setBestStreak((prev) => Math.max(prev, nextStreak));
+    setCorrectCount((prev) => prev + 1);
   };
 
   const handleBlankChoice = (choice: string) => {
@@ -632,51 +616,47 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
     const expected = currentQuestion.answers[blankGuesses.length];
     if (!expected) return;
+    const nextGuesses = [...blankGuesses, expected];
+    const verseDone = nextGuesses.length === currentQuestion.answers.length;
+    setPicked(choice);
 
     if (choice.toLowerCase() === expected.toLowerCase()) {
-      const nextGuesses = [...blankGuesses, expected];
       setBlankGuesses(nextGuesses);
-
-      if (nextGuesses.length === currentQuestion.answers.length) {
+      setPicked(null);
+      if (verseDone) {
         setFeedback('correct');
-        setScore((prev) => prev + 10 + streak * 2);
-        const nextStreak = streak + 1;
-        setStreak(nextStreak);
-        setBestStreak((prev) => Math.max(prev, nextStreak));
-        if (!missedCurrent) setCorrectCount((prev) => prev + 1);
+        if (!missedCurrent) awardCorrect();
         window.setTimeout(advanceLevel, 1100);
       }
       return;
     }
 
+    // Wrong: show the right word, fill it in, and move on. No free retry, and the verse scores 0.
     setFeedback('incorrect');
     setStreak(0);
     setMissedCurrent(true);
     window.setTimeout(() => {
-      setBlankGuesses([]);
-      setFeedback(null);
-    }, 1000);
+      setBlankGuesses(nextGuesses);
+      setPicked(null);
+      if (verseDone) advanceLevel();
+      else setFeedback(null);
+    }, 1500);
   };
 
-  const handleAnswer = (isCorrect: boolean) => {
+  const handleAnswer = (isCorrect: boolean, choice?: string) => {
     if (feedback) return;
+    if (choice !== undefined) setPicked(choice);
     if (isCorrect) {
       setFeedback('correct');
-      setScore((prev) => prev + 10 + streak * 2);
-      const nextStreak = streak + 1;
-      setStreak(nextStreak);
-      setBestStreak((prev) => Math.max(prev, nextStreak));
-      if (!missedCurrent) setCorrectCount((prev) => prev + 1);
+      awardCorrect();
       window.setTimeout(advanceLevel, 1100);
       return;
     }
     setFeedback('incorrect');
     setStreak(0);
     setMissedCurrent(true);
-    window.setTimeout(() => {
-      if (activeMode === 'blanks') setFeedback(null);
-      else advanceLevel();
-    }, 1400);
+    // Builder misses stay up longer so the player can read the correct order.
+    window.setTimeout(advanceLevel, activeMode === 'builder' ? 3200 : 1800);
   };
 
   const handleBuilderClick = (chunk: string) => {
@@ -718,16 +698,14 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     if (currentQuestion?.kind !== 'blanks') return [] as string[];
     const expected = currentQuestion.answers[blankGuesses.length];
     if (!expected) return [] as string[];
-    const pool = [
-      expected,
-      ...currentQuestion.options.filter(
-        (opt) =>
-          opt.toLowerCase() !== expected.toLowerCase() &&
-          !blankGuesses.some((guess) => guess.toLowerCase() === opt.toLowerCase())
-      ).slice(0, Math.max(1, difficultyConfig[activeDifficulty].options - 1)),
-    ].filter(Boolean) as string[];
-    return shuffleArray(pool);
+    const wrong = (currentQuestion.options[blankGuesses.length] ?? [])
+      .slice(0, Math.max(1, difficultyConfig[activeDifficulty].options - 1));
+    return shuffleArray([expected, ...wrong]);
   }, [currentQuestion, blankGuesses, activeDifficulty]);
+  // True once the current question is finished (so the progress bar can count it). A miss on an
+  // early blank of a multi-blank verse doesn't finish the verse.
+  const questionDone = feedback === 'correct' || (feedback === 'incorrect' && (
+    currentQuestion?.kind !== 'blanks' || blankGuesses.length === currentQuestion.answers.length - 1));
   const topRowSets = sets;
 
   // Every library and every game mode needs the Bible text, so hold the screen until it lands
@@ -775,7 +753,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
           {appState === 'playing' && (
             <div className="flex gap-4 text-sm font-mono">
               <div className="flex items-center gap-1 text-gold-400"><Award size={14} /> {score}</div>
-              <div className="flex items-center gap-1 text-ash-500"><AlertTriangle size={14} /> {streak}x</div>
+              <div className={`flex items-center gap-1 ${streak > 0 ? 'text-ember-400' : 'text-ash-600'}`} title="Streak"><Flame size={14} /> x{streak}</div>
             </div>
           )}
           {appState !== 'menu' && (
@@ -999,7 +977,11 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
 
         {appState === 'playing' && currentQuestion && (
           <div className="w-full flex flex-col items-center animate-in fade-in duration-500">
-            <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-gold-500 transition-all duration-500 ease-out" style={{ width: `${(currentLevel / Math.max(activeQuestions.length, 1)) * 100}%` }} /></div>
+            <div className="w-full max-w-xs h-1 bg-neutral-900 rounded-full mb-8 overflow-hidden"><div className="h-full bg-gold-500 transition-all duration-500 ease-out" style={{ width: `${((currentLevel + (questionDone ? 1 : 0)) / Math.max(activeQuestions.length, 1)) * 100}%` }} /></div>
+            <div role="status" aria-live="polite" className="-mt-5 mb-3 h-5 text-xs font-black uppercase tracking-[0.3em]">
+              {feedback === 'correct' && <span className="text-green-400">{missedCurrent ? 'Done' : 'Correct'}</span>}
+              {feedback === 'incorrect' && <span className="text-red-400">Wrong</span>}
+            </div>
 
             {currentQuestion.kind === 'blanks' && (
               <div className="w-full max-w-3xl rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
@@ -1012,7 +994,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
                     const guessedWord = blankIndex >= 0 ? blankGuesses[blankIndex] : undefined;
                     return `${guessedWord ?? word} `;
                   })}</div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{currentBlankOptions.map((opt, i) => <button key={`${opt}-${i}`} onClick={() => handleBlankChoice(opt)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>)}</div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">{currentBlankOptions.map((opt, i) => <button key={`${opt}-${i}`} onClick={() => handleBlankChoice(opt)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback && opt.toLowerCase() === (currentQuestion.answers[blankGuesses.length] || '').toLowerCase() ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt === picked ? 'bg-red-700/70 border-red-500 text-white' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>)}</div>
                 </div>
               </div>
             )}
@@ -1021,7 +1003,7 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
               <div className="w-full max-w-3xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl text-center">
                 <div className="mb-8"><span className="text-purple-400 font-mono text-xs uppercase tracking-widest bg-purple-950/30 px-3 py-1 rounded-full border border-purple-900/50">Identify Reference</span></div>
                 <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">“{currentQuestion.prompt}”</div>
-                <div className="grid grid-cols-2 gap-3">{currentQuestion.options.map((opt, i) => <button key={i} onClick={() => handleAnswer(opt === currentQuestion.correct)} disabled={feedback !== null} className="p-4 rounded-xl text-lg font-mono font-bold border-2 bg-neutral-800 border-neutral-700 hover:border-purple-500">{opt}</button>)}</div>
+                <div className="grid grid-cols-2 gap-3">{currentQuestion.options.map((opt, i) => <button key={i} onClick={() => handleAnswer(opt === currentQuestion.correct, opt)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-mono font-bold border-2 transition-all ${feedback && opt === currentQuestion.correct ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt === picked ? 'bg-red-700/70 border-red-500 text-white' : 'bg-neutral-800 border-neutral-700 hover:border-purple-500'}`}>{opt}</button>)}</div>
               </div>
             )}
 
@@ -1029,9 +1011,15 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
               <div className="w-full max-w-3xl flex flex-col items-center">
                 <div className="mb-4 text-sm font-black text-gold-400">{currentQuestion.verse.ref}</div>
                 <div className="w-full bg-neutral-900 min-h-[160px] p-6 rounded-2xl border-2 border-dashed border-neutral-700 mb-6 flex flex-wrap content-start gap-2 relative transition-all">
-                  {builderState.selected.map((chunk, i) => <div key={`${chunk}-${i}`} className="inline-flex items-center gap-1 rounded-lg border border-gold-500/30 bg-gold-500/15 px-2 py-2 text-soot-950 shadow-lg"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderState.selected.length - 1} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>)}
+                  {builderState.selected.map((chunk, i) => <div key={`${chunk}-${i}`} className="inline-flex items-center gap-1 rounded-lg border border-gold-500/30 bg-gold-500/15 px-2 py-2 text-gold-100 shadow-lg"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderState.selected.length - 1} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>)}
                   {builderState.selected.length > 0 && !feedback && <button onClick={handleBuilderUndo} className="absolute bottom-4 right-4 text-xs text-ash-500 hover:text-white underline">Undo Last</button>}
                 </div>
+                {feedback === 'incorrect' && (
+                  <div role="status" className="mb-6 w-full rounded-2xl border border-green-600/40 bg-green-900/20 p-4 text-left">
+                    <div className="mb-1 text-[11px] font-black uppercase tracking-[0.25em] text-green-400">Correct order</div>
+                    <div className="font-serif text-lg text-ash-200">{currentQuestion.verse.text}</div>
+                  </div>
+                )}
                 <div className="mb-3 text-xs font-black uppercase tracking-[0.3em] text-ash-600">Tap words below, then reorder the placed line</div>
                 <div className="mb-4 flex items-center gap-3">
                   <button onClick={handleBuilderConfirm} disabled={feedback !== null || builderState.scrambled.length > 0 || builderState.selected.length === 0} className="btn-primary rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.2em] disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>

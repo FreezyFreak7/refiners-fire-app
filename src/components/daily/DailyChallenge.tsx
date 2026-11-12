@@ -11,9 +11,10 @@ import {
   TIME_PER_QUESTION_MS,
   type DailyQuestion,
 } from '../../utils/dailyChallenge';
-import { dailyBoardId, fetchRank, submitScore } from '../../utils/leaderboard';
-import { recordActivity } from '../../utils/userStats';
+import { dailyBoardId } from '../../utils/leaderboard';
 import type { UserProfile } from '../../utils/userProfile';
+import { usePostResult } from './usePostResult';
+import ClaimUsername from './ClaimUsername';
 
 interface DailyChallengeProps {
   user: { uid: string } | null;
@@ -47,11 +48,16 @@ const DailyChallenge: React.FC<DailyChallengeProps> = ({
   const [msLeft, setMsLeft] = useState(TIME_PER_QUESTION_MS);
   const deadline = useRef(0);
 
-  const [rank, setRank] = useState<number | null>(null);
-  const [submitState, setSubmitState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const [newStreak, setNewStreak] = useState<number | null>(null);
-  // Bumped after a score is posted so the results leaderboard refetches and shows the new standing.
-  const [boardRefresh, setBoardRefresh] = useState(0);
+  // Guards one answer per question. A ref (not a setState updater) so scoring runs exactly once,
+  // even under StrictMode, which calls updaters twice in development.
+  const answeredRef = useRef(false);
+
+  // The finished run; posting/recording waits on it and retries once the player signs in or
+  // picks a username from the results screen.
+  const [result, setResult] = useState<{ score: number; versesCorrect: number } | null>(null);
+  const { submitState, rank, newStreak, boardRefresh } = usePostResult({
+    user, isMember, profile, boardId, mode: 'daily', result,
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -75,15 +81,14 @@ const DailyChallenge: React.FC<DailyChallengeProps> = ({
   // running out (choice = null → scored as wrong).
   const reveal = useCallback(
     (choice: number | null) => {
-      setPhase((p) => {
-        if (p !== 'playing') return p;
-        setPicked(choice);
-        const remaining = Math.max(0, deadline.current - performance.now());
-        const correct = choice !== null && question?.correctIndex === choice;
-        setScore((s) => s + scoreForAnswer(correct, remaining));
-        if (correct) setCorrectCount((c) => c + 1);
-        return 'reveal';
-      });
+      if (answeredRef.current) return;
+      answeredRef.current = true;
+      setPicked(choice);
+      const remaining = Math.max(0, deadline.current - performance.now());
+      const correct = choice !== null && question?.correctIndex === choice;
+      setScore((s) => s + scoreForAnswer(correct, remaining));
+      if (correct) setCorrectCount((c) => c + 1);
+      setPhase('reveal');
     },
     [question],
   );
@@ -106,6 +111,7 @@ const DailyChallenge: React.FC<DailyChallengeProps> = ({
 
   const startQuestion = (i: number) => {
     setIndex(i);
+    answeredRef.current = false;
     setPicked(null);
     setMsLeft(TIME_PER_QUESTION_MS);
     setPhase('playing');
@@ -120,33 +126,9 @@ const DailyChallenge: React.FC<DailyChallengeProps> = ({
     }
   };
 
-  const finish = async () => {
+  const finish = () => {
     setPhase('done');
-    if (!isMember || !user) return;
-
-    // Private stats (streak, lifetime count) record independently of the public leaderboard, so
-    // they update even if the board rules aren't deployed.
-    recordActivity(user.uid, { versesCorrect: correctCount, mode: 'daily', score })
-      .then((res) => setNewStreak(res.streak))
-      .catch(() => {});
-
-    if (profile?.username) {
-      try {
-        setSubmitState('saving');
-        await submitScore(boardId, {
-          uid: user.uid,
-          username: profile.username,
-          avatarId: profile.avatarId,
-          score,
-        });
-        setSubmitState('saved');
-        setRank(await fetchRank(boardId, score));
-      } catch {
-        setSubmitState('error');
-      } finally {
-        setBoardRefresh((n) => n + 1);
-      }
-    }
+    setResult({ score, versesCorrect: correctCount });
   };
 
   if (loadError) {
@@ -225,7 +207,9 @@ const DailyChallenge: React.FC<DailyChallengeProps> = ({
             </div>
           )}
 
-          {isMember ? (
+          {isMember && user && !profile?.username ? (
+            <ClaimUsername uid={user.uid} />
+          ) : isMember ? (
             <div className="mt-3 text-xs text-ash-500">
               {submitState === 'saving' && 'Posting your score…'}
               {submitState === 'saved' && rank !== null && (
