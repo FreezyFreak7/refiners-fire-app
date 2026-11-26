@@ -5,10 +5,6 @@ declare module '*utils/firebase' {
   export const db: any;
 }
 
-declare module '*data/gameData' {
-  export const gameData: any;
-}
-
 declare module '*data/acts' {
   export const acts: any;
 }

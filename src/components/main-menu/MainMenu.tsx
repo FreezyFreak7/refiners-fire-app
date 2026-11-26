@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { BookOpen, ChevronRight, Coffee, Flame, LogIn, LogOut, Radio, ScrollText, Settings, Sparkles, Swords, Trophy, User, UserRound } from 'lucide-react';
+import { BookOpen, ChevronRight, Coffee, Flame, LogIn, LogOut, Radio, ScrollText, Sparkles, Swords, Trophy, User, UserRound } from 'lucide-react';
 import type { AuthTab } from './AuthModal';
 import BackgroundShell from './BackgroundShell';
 import { avatarSrc } from '../../data/avatars';
@@ -25,13 +25,11 @@ type MenuItemId =
   | 'start_alpha_omega'
   | 'start_live_group'
   | 'how'
-  | 'settings'
   | 'credits';
 
 const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelectMode, onOpenAuth, onOpenProfile, onOpenDaily, onOpenFurnace, onLogout }) => {
   const [activeId, setActiveId] = useState<MenuItemId>('start_old_testament');
-  const [panel, setPanel] = useState<null | 'how' | 'settings' | 'credits'>(null);
-  const [tab, setTab] = useState<'libraries' | 'live'>('libraries');
+  const [panel, setPanel] = useState<null | 'how' | 'credits'>(null);
 
   const items = useMemo(() => {
     const base: { id: MenuItemId; label: string; icon: React.ReactNode }[] = [
@@ -53,21 +51,12 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
     else if (id === 'start_alpha_omega') onSelectMode('alpha_omega');
     else if (id === 'start_live_group') onSelectMode('live_group');
     else if (id === 'how') setPanel('how');
-    else if (id === 'settings') setPanel('settings');
     else if (id === 'credits') setPanel('credits');
   };
 
   const onKeyDown = async (e: React.KeyboardEvent) => {
     if (panel) {
       if (e.key === 'Escape') setPanel(null);
-      return;
-    }
-
-    if (tab === 'live') {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        onSelectMode('live_group');
-      }
       return;
     }
 
@@ -176,8 +165,24 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
             </p>
           </div>
 
+        {/* Live Group Study first: it is what a host reaches for, and it was buried behind a tab. */}
+        <button
+          type="button"
+          onClick={() => onSelectMode('live_group')}
+          className="group mb-3 flex w-full max-w-3xl items-center gap-4 border border-ember-500/60 bg-gradient-to-br from-ember-700/25 to-transparent px-5 py-5 text-left transition-colors hover:border-ember-400"
+        >
+          <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-ember-400/50 bg-soot-900 text-ember-400">
+            <Radio size={22} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-display text-lg font-semibold uppercase tracking-forge text-ash-200">Live Group Study</span>
+            <span className="block text-xs text-ash-500">Host a room or join with a code. Class Quizzes live here.</span>
+          </span>
+          <ChevronRight size={18} className="shrink-0 text-ember-400" />
+        </button>
+
         {/* Challenges — competitive modes with world leaderboards, given top billing. */}
-        <div className="mb-5 grid w-full max-w-3xl gap-2 sm:grid-cols-2">
+        <div className="mb-3 grid w-full max-w-3xl gap-2 sm:grid-cols-2">
           <button
             type="button"
             onClick={onOpenDaily}
@@ -217,43 +222,8 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
           </button>
         </div>
 
-        {/* Tabs as struck plates on a rail, not pills in a tray. The active one is lit from below. */}
-        <div className="mb-5 grid w-full max-w-3xl grid-cols-2 border-b border-iron-800">
-          <button
-            type="button"
-            onClick={() => setTab('libraries')}
-            className={`group inline-flex items-center justify-center gap-2 border-b-2 px-4 py-3 font-display text-sm font-semibold uppercase tracking-forge transition-colors ${
-              tab === 'libraries'
-                ? 'border-ember-500 text-ash-200'
-                : 'border-transparent text-ash-600 hover:text-ash-400'
-            }`}
-          >
-            <BookOpen size={15} className={tab === 'libraries' ? 'text-ember-400' : ''} />
-            Libraries
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab('live')}
-            className={`group inline-flex items-center justify-center gap-2 border-b-2 px-4 py-3 font-display text-sm font-semibold uppercase tracking-forge transition-colors ${
-              tab === 'live'
-                ? 'border-ember-500 text-ash-200'
-                : 'border-transparent text-ash-600 hover:text-ash-400'
-            }`}
-          >
-            <Radio size={15} className={tab === 'live' ? 'text-ember-400' : ''} />
-            Live Group Study
-          </button>
-        </div>
-
-        {/* Both panels share one grid cell, so the row is always as tall as the taller panel
-            and nothing below the tabs moves when you switch between them. */}
-        <div className="grid w-full max-w-3xl">
-        <div
-          className={`[grid-area:1/1] plate w-full self-start p-6 ${
-            tab === 'libraries' ? '' : 'invisible'
-          }`}
-        >
-          <div className="stamp mb-4">Select library</div>
+        <div className="plate mb-3 w-full max-w-3xl self-start p-6">
+          <div className="stamp mb-4">Solo libraries</div>
 
           {/* Rows divided by hairlines rather than each floating in its own card. */}
           <div className="divide-y divide-iron-800/70 border-y border-iron-800/70">
@@ -307,30 +277,22 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
             })}
           </div>
         </div>
-        <div
-          className={`[grid-area:1/1] plate w-full self-start p-10 text-center ${
-            tab === 'live' ? '' : 'invisible'
-          }`}
+
+        {/* My Quizzes: building and sharing your own quizzes used to be hidden inside Profile. */}
+        <button
+          type="button"
+          onClick={onOpenProfile}
+          className="group flex w-full max-w-3xl items-center gap-4 border border-iron-700 px-5 py-4 text-left transition-colors hover:border-ember-500"
         >
-          <Radio size={34} className="mx-auto mb-5 text-ember-400 drop-shadow-[0_0_18px_rgba(255,107,31,0.5)]" />
-
-          <h2 className="struck text-4xl">Live Group Study</h2>
-
-          <div className="mx-auto mt-4 w-24 rule-fade" />
-
-          <p className="mx-auto mt-4 max-w-sm text-sm text-ash-500">
-            Host a room or join friends with a room code and race through verse challenges together in real time.
-          </p>
-
-          <button
-            type="button"
-            onClick={() => onSelectMode('live_group')}
-            className="btn-primary mt-7 inline-flex items-center justify-center gap-2 px-7 py-3 font-display text-sm font-semibold uppercase tracking-forge"
-          >
-            <Radio size={15} /> Enter Live Study
-          </button>
-        </div>
-        </div>
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-iron-700 bg-soot-900 text-ash-400">
+            <ScrollText size={18} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block font-display text-base font-semibold uppercase tracking-forge text-ash-300">My Quizzes</span>
+            <span className="block text-xs text-ash-600">Build your own quizzes and share them with a link. Needs an account.</span>
+          </span>
+          <ChevronRight size={18} className="shrink-0 text-iron-600 transition-colors group-hover:text-ember-400" />
+        </button>
 
         {/* Secondary actions read as engraved text on the plate, not as three more buttons. */}
         <div className="mt-8 flex w-full max-w-3xl items-center justify-center gap-6">
@@ -340,14 +302,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
             className="inline-flex items-center gap-2 font-display text-xs font-semibold uppercase tracking-forge text-ash-600 transition-colors hover:text-ember-400"
           >
             <Trophy size={14} /> How to play
-          </button>
-          <span className="h-3 w-px bg-iron-700" />
-          <button
-            type="button"
-            onClick={() => setPanel('settings')}
-            className="inline-flex items-center gap-2 font-display text-xs font-semibold uppercase tracking-forge text-ash-600 transition-colors hover:text-ember-400"
-          >
-            <Settings size={14} /> Settings
           </button>
           <span className="h-3 w-px bg-iron-700" />
           <button
@@ -376,10 +330,6 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
                   </p>
                   <p className="text-ash-600">Tip: the arrow keys and Enter work throughout the menu.</p>
                 </div>
-              )}
-
-              {panel === 'settings' && (
-                <div className="text-sm text-ash-500">Settings panel coming soon.</div>
               )}
 
               {panel === 'credits' && (
