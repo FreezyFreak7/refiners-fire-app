@@ -222,7 +222,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ isMember, profile, streak, onSelect
           </button>
         </div>
 
-        <div className="plate mb-3 w-full max-w-3xl self-start p-6">
+        <div className="plate mb-3 w-full max-w-3xl p-6">
           <div className="stamp mb-4">Solo libraries</div>
 
           {/* Rows divided by hairlines rather than each floating in its own card. */}
