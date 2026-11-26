@@ -58,12 +58,12 @@ export type RoomQuestion = ChoiceRoomQuestion | BuilderRoomQuestion | MultiBlank
 export const MULTI_BLANK_SEPARATOR = ' | ';
 
 /** Builders take longer to answer than a tap, so they get this multiple of the room's timer. */
-export const BUILDER_TIME_SCALE = 2.5;
+export const BUILDER_TIME_SCALE = 1.5;
 
-/** Builders get BUILDER_TIME_SCALE; multi-blank verses get +75% of the timer per extra blank. */
+/** Builders get BUILDER_TIME_SCALE; multi-blank verses get +40% of the timer per extra blank. */
 export const roomQuestionMs = (q: RoomQuestion | undefined, baseMs: number) => {
   if (q?.kind === 'builder') return Math.round(baseMs * BUILDER_TIME_SCALE);
-  if (q?.kind === 'multi') return Math.round(baseMs * (1 + 0.75 * Math.max(0, q.answers.length - 1)));
+  if (q?.kind === 'multi') return Math.round(baseMs * (1 + 0.4 * Math.max(0, q.answers.length - 1)));
   return baseMs;
 };
 
