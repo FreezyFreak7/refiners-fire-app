@@ -17,7 +17,12 @@ import { fetchSharedQuiz } from './utils/sharedQuiz';
 import type { Quiz } from './utils/quiz';
 
 const App: React.FC = () => {
-  const [mode, setMode] = useState<'old_testament' | 'gospels' | 'new_testament' | 'revelation' | 'alpha_omega' | 'live_group' | 'profile' | 'daily' | 'furnace' | null>(null);
+  // A ?room=CODE link drops the player straight into the join form for that live room.
+  const [sharedRoomCode, setSharedRoomCode] = useState(() => {
+    const c = new URLSearchParams(window.location.search).get('room') || '';
+    return /^[A-Za-z0-9]{4}$/.test(c) ? c.toUpperCase() : '';
+  });
+  const [mode, setMode] = useState<'old_testament' | 'gospels' | 'new_testament' | 'revelation' | 'alpha_omega' | 'live_group' | 'profile' | 'daily' | 'furnace' | null>(sharedRoomCode ? 'live_group' : null);
 
   const [showLaunch, setShowLaunch] = useState(true);
   const [user, setUser] = useState<any>(null);
@@ -237,7 +242,12 @@ const App: React.FC = () => {
       )}
       {(mode === 'revelation' || mode === 'live_group') && (
         <RevelationGame
-          onBack={() => setMode(null)}
+          initialRoomCode={mode === 'live_group' ? sharedRoomCode : ''}
+          onBack={() => {
+            // Drop the ?room= param so a refresh doesn't reopen the invite.
+            if (sharedRoomCode) { setSharedRoomCode(''); window.history.replaceState(null, '', window.location.pathname); }
+            setMode(null);
+          }}
           username={profile?.username || undefined}
           user={user}
           authLoading={authLoading}
