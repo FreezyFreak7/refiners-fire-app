@@ -176,9 +176,11 @@ interface RevelationGameProps {
   authLoading: boolean;
   isMember: boolean;
   initialAppState?: 'actSelect' | 'lobby';
+  /** From a shared ?room=CODE link: opens the join form with the code already filled in. */
+  initialRoomCode?: string;
 }
 
-const RevelationGame = ({ onBack, username, user, authLoading, isMember, initialAppState = 'actSelect' }: RevelationGameProps) => {
+const RevelationGame = ({ onBack, username, user, authLoading, isMember, initialAppState = 'actSelect', initialRoomCode = '' }: RevelationGameProps) => {
   const [appId] = useState(APP_ID);
   const isMaster = !!isMember;
   const lobbyReturnToMainMenu = initialAppState === 'lobby';
@@ -221,7 +223,8 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
     setPrefilledFrom(username);
     if (!playerName) setPlayerName(username);
   }
-  const [roomCode, setRoomCode] = useState('');
+  const [roomCode, setRoomCode] = useState(initialRoomCode);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [isHost, setIsHost] = useState(false);
   const [roomData, setRoomData] = useState<any>(null);
   const [mpFeedback, setMpFeedback] = useState<'correct' | 'incorrect' | null>(null);
@@ -233,7 +236,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
   const scoreboardArmedRef = useRef(false);
   const scoreboardTimerRef = useRef<number | null>(null);
   // The lobby is a two-step choose-your-path: pick Host or Join, then enter your details.
-  const [lobbyChoice, setLobbyChoice] = useState<'menu' | 'host' | 'join'>('menu');
+  const [lobbyChoice, setLobbyChoice] = useState<'menu' | 'host' | 'join'>(initialRoomCode ? 'join' : 'menu');
 
   // The Bible text (fetched from public/, ~4MB) — only the host needs it, to build a library round.
   // Loaded lazily once the player is in the live-study flow so single-player Revelation never pays for it.
@@ -344,6 +347,19 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
       [`players.${user.uid}`]: existing ? { ...existing, name: playerName.trim() } : freshPlayer(playerName.trim()),
     });
     setAppState('multiplayer_room');
+  };
+
+  // A link straight into this room's lobby: players land on the join form with the code filled in.
+  const shareRoomLink = async () => {
+    const url = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+    if (navigator.share) {
+      try { await navigator.share({ title: 'Join my live study', text: `Join my live study (code ${roomCode})`, url }); return; } catch (e: any) { if (e?.name === 'AbortError') return; }
+    }
+    try {
+      await navigator.clipboard.writeText(url);
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 2000);
+    } catch { window.prompt('Copy this link:', url); }
   };
 
   // Leaving removes your seat, so the host isn't left waiting on an answer that will never come.
@@ -755,6 +771,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
         <div className="w-full max-w-4xl rounded-3xl border border-gold-500/25 bg-soot-900/60 p-2 text-center shadow-2xl ">
           <div className="rounded-[1.75rem] border border-iron-800/60 bg-gradient-to-b from-gold-700/12 via-soot-950/50 to-soot-900/80 p-8 space-y-6">
             <div className="bg-soot-900/70 p-4 rounded-2xl inline-block border border-gold-500/30"><div className="text-xs text-gold-400 font-mono">ROOM CODE</div><div className="text-4xl font-black text-white tracking-widest">{roomCode}</div></div>
+            <div><button onClick={shareRoomLink} className="rounded-full border border-gold-500/30 bg-gold-700/20 px-5 py-2 text-sm font-black uppercase tracking-[0.2em] text-white transition-colors hover:bg-gold-700/25">{linkCopied ? 'Link copied!' : 'Share invite link'}</button></div>
             <div className="space-y-2"><h3 className="text-ash-500 text-sm uppercase tracking-widest">Players Joined</h3><div className="flex flex-wrap gap-2 justify-center">{(Object.values(roomData.players || {}) as any[]).map((p: any, i: any) => (<span key={i} className="px-3 py-1 rounded-full border border-iron-800 bg-soot-900/50 text-white text-sm">{p.name}</span>))}</div></div>
             {isHost ? (() => {
               const source: RoomSource = roomData.source || 'revelation';
