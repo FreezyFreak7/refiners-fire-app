@@ -31,61 +31,42 @@ const blankDecoys = (r) => {
   return out;
 };
 
-// Full-answer decoys for the "pick the answer" style: other questions' answers of similar length.
-const pickDecoys = (r) => {
-  const rand = rng(r.i * 104729 + 7);
-  const cands = rows
-    .filter((o) => o.n !== r.n && norm(o.plain) !== norm(r.plain))
-    .map((o) => ({ o, s: Math.abs(o.plain.length - r.plain.length) / Math.max(10, r.plain.length) + rand() * 0.35 }))
-    .sort((x, y) => x.s - y.s);
-  const seen = new Set([norm(r.plain)]); const out = [];
-  for (const { o } of cands) { if (seen.has(norm(o.plain))) continue; seen.add(norm(o.plain)); out.push(o.plain); if (out.length === 3) break; }
-  return out;
-};
-
 const tag = (r) => `Exam Q${r.n}${r.label}`;
-const q = (o) => '      ' + JSON.stringify(o).replace(/"([a-z]+)":/g, '$1:') + ',';
 
-const RANGES = [[1, 10], [11, 20], [21, 30], [31, 40]];
-const out = [];
-for (const [lo, hi] of RANGES) {
-  const rs = rows.filter((r) => r.n >= lo && r.n <= hi);
-  const blank = rs.map((r) => ({ kind: 'blank', verse: tag(r), prompt: `${r.ask} — ${promptOf(r.text)}`, answers: r.blanks, decoys: blankDecoys(r) }));
-  const builder = [];
-  for (const r of rs) {
-    const ch = chunksOf(r.text);
-    if (ch.length < 3) continue;
-    const groups = Math.ceil(ch.length / 8), size = Math.ceil(ch.length / groups);
-    for (let g = 0; g < groups; g++) {
-      const part = ch.slice(g * size, (g + 1) * size);
-      const suffix = groups > 1 ? ` (part ${g + 1} of ${groups})` : '';
-      builder.push({ kind: 'builder', verse: tag(r) + suffix, prompt: `Put the answer in order: ${r.ask}${suffix}`, chunks: part });
-    }
+const items = rows.map((r) => {
+  const ch = chunksOf(r.text);
+  const groups = [];
+  if (ch.length >= 3) {
+    const n = Math.ceil(ch.length / 8), size = Math.ceil(ch.length / n);
+    for (let g = 0; g < n; g++) groups.push(ch.slice(g * size, (g + 1) * size));
   }
-  const pick = rs.map((r) => ({ kind: 'blank', verse: tag(r), prompt: `${r.ask} → _____`, answers: [r.plain], decoys: pickDecoys(r) }));
-  const label = `Q${lo}–${hi}`;
-  out.push({ id: `exam-q${lo}-${hi}-blanks`, name: `Exam ${label} · Fill the Blanks`, questions: blank });
-  out.push({ id: `exam-q${lo}-${hi}-builder`, name: `Exam ${label} · Builder`, questions: builder });
-  out.push({ id: `exam-q${lo}-${hi}-pick`, name: `Exam ${label} · Pick the Answer`, questions: pick });
-}
+  return { n: r.n, label: r.label, ask: r.ask, answer: r.plain, blankPrompt: `${r.ask} — ${promptOf(r.text)}`, blanks: r.blanks, decoys: blankDecoys(r), chunks: groups };
+});
 
 let ts = `/**
- * Exam quizzes for Completion_Answer_English.pdf (40 questions, 100 sub-answers; five answers that list separate items, Q7③, Q17③, Q19①, Q28②, Q31②, are split so there are ${rows.length} prompts). Answers are
- * word-for-word from the exam's answer key; the prompts are short forms of the exam questions.
- * Three styles, each in four parts of ten questions:
- *   Fill the Blanks  the exact answer with its key terms blanked, filled from a word bank
- *   Builder          the exact answer cut into pieces to put back in order
- *   Pick the Answer  the exact answer among answers from other questions
+ * The Graduation Exam (Completion_Answer_English.pdf): 40 questions, 100 sub-answers. Five answers that
+ * list separate items (Q7③, Q17③, Q19①, Q28②, Q31②) are split, so there are ${items.length} items here.
+ * \`answer\` is word-for-word from the exam's answer key; \`ask\` is a short form of the exam question.
+ * The live room turns each item into a fill-in-the-blanks, builder or write-the-answer question.
  *
  * Generated: edit scripts/exam/parts.mjs, then run: node scripts/exam/gen.mjs src/data/examQuizzes.ts
  */
-import type { ClassQuiz } from './classQuizzes';
-
-export const EXAM_QUIZZES: ClassQuiz[] = [
-`;
-for (const z of out) {
-  ts += `  {\n    id: '${z.id}',\n    name: '${z.name}',\n    questions: [\n${z.questions.map(q).join('\n')}\n    ],\n  },\n`;
+export interface ExamItem {
+  n: number;
+  label: string;
+  ask: string;
+  answer: string;
+  /** The question plus the answer with each key term as _____, filled in order from \`blanks\`. */
+  blankPrompt: string;
+  blanks: string[];
+  decoys: string[];
+  /** The answer in order as pieces for the builder, split into groups of at most 8. Empty = too short to build. */
+  chunks: string[][];
 }
+
+export const EXAM_ITEMS: ExamItem[] = [
+`;
+for (const it of items) ts += '  ' + JSON.stringify(it).replace(/"([a-zA-Z]+)":/g, '$1:') + ',\n';
 ts += '];\n';
 fs.writeFileSync(process.argv[2], ts);
-console.log(out.map((z) => `${z.name}: ${z.questions.length}`).join('\n'));
+console.log(items.length + ' items');

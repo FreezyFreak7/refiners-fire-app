@@ -20,9 +20,7 @@ export interface ClassQuiz {
   questions: ClassQuizQuestion[];
 }
 
-import { EXAM_QUIZZES } from './examQuizzes';
-
-const REVELATION_QUIZZES: ClassQuiz[] = [
+export const CLASS_QUIZZES: ClassQuiz[] = [
   {
     id: 'rev-1-9-20',
     name: 'Revelation 1:9-20',
@@ -72,6 +70,3 @@ const REVELATION_QUIZZES: ClassQuiz[] = [
     ],
   },
 ];
-
-// Revelation passages first (the first entry is the default for a new room), then the exam quizzes.
-export const CLASS_QUIZZES: ClassQuiz[] = [...REVELATION_QUIZZES, ...EXAM_QUIZZES];

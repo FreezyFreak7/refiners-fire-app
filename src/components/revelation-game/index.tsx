@@ -12,8 +12,14 @@ import { CLASS_QUIZZES } from '../../data/classQuizzes';
 import { shuffleArray } from '../../utils/helpers';
 import { loadBible, type BibleData } from '../../utils/bible';
 import {
+  answersMatch,
   booksForSource,
   buildClassQuizPool,
+  buildExamPool,
+  EXAM_MODE_LABELS,
+  EXAM_RANGES,
+  examItemsInRange,
+  type ExamMode,
   buildLibraryPool,
   MULTI_BLANK_SEPARATOR,
   roomQuestionMs,
@@ -271,6 +277,8 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
   const [mpPlaced, setMpPlaced] = useState<number[]>([]);
   // Live-room multi-blank verse: for each blank, the word-bank index placed there (null = empty).
   const [mpSlots, setMpSlots] = useState<(number | null)[]>([]);
+  // Live-room write-the-answer question: what this player has typed so far.
+  const [mpTyped, setMpTyped] = useState('');
 
   const totalPossibleScore = activeQuestions.length
     ? activeQuestions.length * 10 + activeQuestions.length * (activeQuestions.length - 1)
@@ -418,6 +426,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
     setMpFeedback(null);
     setMpLastGain(0);
     setMpPlaced([]);
+    setMpTyped('');
     const q = roomData?.questions?.[idx];
     setMpSlots(q?.kind === 'multi' ? q.answers.map(() => null) : []);
     setMpTimeLeft(mpQuestionMs);
@@ -475,6 +484,8 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
       const classQuiz = CLASS_QUIZZES.find((q) => q.id === roomData.classQuizId) || CLASS_QUIZZES[0];
       if (!classQuiz) return setMpError('Pick a class quiz first.');
       questions = buildClassQuizPool(classQuiz);
+    } else if (source === 'exam') {
+      questions = buildExamPool((roomData.examMode as ExamMode) || 'mix', roomData.examRange || 'all');
     } else if (source === 'revelation') {
       questions = buildMpQuestionPool(roomData.chapterId || 'rev1', count);
     } else {
@@ -502,7 +513,11 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
     if (source === 'class' && !roomData?.classQuizId && CLASS_QUIZZES[0]) {
       patch.classQuizId = CLASS_QUIZZES[0].id;
     }
-    if (source !== 'quiz' && source !== 'revelation' && source !== 'class' && !roomData?.libraryMode) {
+    if (source === 'exam') {
+      if (!roomData?.examMode) patch.examMode = 'mix';
+      if (!roomData?.examRange) patch.examRange = 'all';
+    }
+    if (source !== 'quiz' && source !== 'revelation' && source !== 'class' && source !== 'exam' && !roomData?.libraryMode) {
       patch.libraryMode = 'blanks';
     }
     await updateDoc(sessionRef, patch);
@@ -529,6 +544,11 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
     await updateDoc(sessionRef, { classQuizId });
   };
 
+  const mpSelectExam = async (patch: { examMode?: ExamMode; examRange?: string }) => {
+    const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
+    await updateDoc(sessionRef, patch);
+  };
+
   const mpSelectVerseCount = async (count: number) => {
     const clamped = Math.max(1, Math.min(MP_MAX_VERSES, count));
     const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
@@ -552,7 +572,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
     if (!roomData || mpFeedback || mpAnsweredRef.current) return;
     mpAnsweredRef.current = true;
     const currentQ = activeQuestions[roomData.questionIndex];
-    const isCorrect = answer === currentQ.blank;
+    const isCorrect = currentQ.kind === 'typed' ? answersMatch(String(answer), currentQ.blank) : answer === currentQ.blank;
     setMpFeedback(isCorrect ? 'correct' : 'incorrect');
 
     // Faster answers keep more of the speed bonus; correct-but-slow still earns the base.
@@ -775,7 +795,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
             <div className="space-y-2"><h3 className="text-ash-500 text-sm uppercase tracking-widest">Players Joined</h3><div className="flex flex-wrap gap-2 justify-center">{(Object.values(roomData.players || {}) as any[]).map((p: any, i: any) => (<span key={i} className="px-3 py-1 rounded-full border border-iron-800 bg-soot-900/50 text-white text-sm">{p.name}</span>))}</div></div>
             {isHost ? (() => {
               const source: RoomSource = roomData.source || 'revelation';
-              const isLibrary = source !== 'revelation' && source !== 'quiz' && source !== 'class';
+              const isLibrary = source !== 'revelation' && source !== 'quiz' && source !== 'class' && source !== 'exam';
               const libraryBooks = isLibrary && bibleData ? booksForSource(bibleData, source) : [];
               const pickedBook: string = isLibrary && roomData.book && libraryBooks.includes(roomData.book) ? roomData.book : '';
               const pickedBookVerses = pickedBook && bibleData
@@ -785,7 +805,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
                 ? Math.max(1, Math.min(MP_MAX_VERSES, chapterVerseCount(roomData.chapterId || 'rev1')))
                 : Math.max(1, Math.min(MP_MAX_VERSES, pickedBookVerses));
               const sliderValue = Math.min(mpVerseCount, sliderMax);
-              const contentOptions: RoomSource[] = ['revelation', 'old_testament', 'new_testament', 'gospels', 'alpha_omega', ...(CLASS_QUIZZES.length ? (['class'] as RoomSource[]) : []), ...(hostableQuizzes.length ? (['quiz'] as RoomSource[]) : [])];
+              const contentOptions: RoomSource[] = ['revelation', 'old_testament', 'new_testament', 'gospels', 'alpha_omega', ...(CLASS_QUIZZES.length ? (['class'] as RoomSource[]) : []), 'exam' as RoomSource, ...(hostableQuizzes.length ? (['quiz'] as RoomSource[]) : [])];
               return (<div className="space-y-4">
               {/* What the room plays: any Bible library, one of the host's quizzes, or Revelation. */}
               <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4">
@@ -833,6 +853,33 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
                 );
               })()}
 
+              {source === 'exam' && (() => {
+                const mode = (roomData.examMode as ExamMode) || 'mix';
+                const rangeId = roomData.examRange || 'all';
+                const count = examItemsInRange(rangeId).length;
+                return (
+                  <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4 space-y-4">
+                    <div>
+                      <label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Exam Mode</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {(Object.keys(EXAM_MODE_LABELS) as ExamMode[]).map((m) => (
+                          <button key={m} type="button" onClick={() => mpSelectExam({ examMode: m })} className={`rounded-xl border p-3 text-xs font-black uppercase tracking-[0.12em] transition-all ${mode === m ? 'border-gold-500/60 bg-gold-500/15 text-gold-300' : 'border-iron-800 bg-soot-900/50 text-ash-300 hover:border-gold-500/30'}`}>{EXAM_MODE_LABELS[m]}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Questions</label>
+                      <select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectExam({ examRange: e.target.value })} value={rangeId}>
+                        {EXAM_RANGES.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}
+                      </select>
+                    </div>
+                    <div className="text-[11px] text-ash-600">
+                      {count} answers from the exam, in exam order, word for word. {mode === 'write' ? 'Players type the whole answer; capitals and punctuation don’t matter.' : mode === 'mix' ? 'Each answer is asked one random way: blanks, builder or typed.' : mode === 'builder' ? 'Long answers are split into several parts, and very short ones are skipped.' : 'Key terms are blanked and filled from a word bank.'} Typing and long builders get extra time.
+                    </div>
+                  </div>
+                );
+              })()}
+
               {source === 'revelation' && (
                 <div className="text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4"><label className="text-xs text-ash-500 mb-2 block uppercase tracking-[0.2em]">Select Chapter</label><select className="w-full rounded-xl border border-gold-500/20 bg-neutral-950 text-white p-3 outline-none" onChange={(e) => mpSelectChapter(e.target.value)} value={roomData.chapterId || 'rev1'}>{chapters.map((c: any) => <option key={c.id} value={c.id}>{c.title} ({c.ref})</option>)}</select></div>
               )}
@@ -876,7 +923,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
                 </div>
                 <div className="mt-2 text-[11px] text-ash-600">Answer faster to earn more points — up to {MP_BASE_POINTS + MP_SPEED_BONUS} per question.</div>
               </div>
-              <div className={`text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4 ${source === 'quiz' || source === 'class' ? 'hidden' : ''}`}>
+              <div className={`text-left rounded-2xl border border-iron-800 bg-soot-900/50 p-4 ${source === 'quiz' || source === 'class' || source === 'exam' ? 'hidden' : ''}`}>
                 <div className="mb-2 flex items-center justify-between">
                   <label className="text-xs text-ash-500 uppercase tracking-[0.2em]">Verses to Play</label>
                   <span className="rounded-lg border border-gold-500/30 bg-gold-700/15 px-3 py-1 text-sm font-black text-gold-300">{sliderValue}</span>
@@ -900,6 +947,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
               const s: RoomSource = roomData.source || 'revelation';
               if (s === 'quiz') return roomData.quizName || 'Custom quiz';
               if (s === 'class') return (CLASS_QUIZZES.find((q) => q.id === roomData.classQuizId) || CLASS_QUIZZES[0])?.name || 'Class quiz';
+              if (s === 'exam') return `Graduation Exam · ${EXAM_MODE_LABELS[(roomData.examMode as ExamMode) || 'mix']} · ${(EXAM_RANGES.find((r) => r.id === (roomData.examRange || 'all')) || EXAM_RANGES[0]).label}`;
               if (s === 'revelation') return `Revelation · ${roomData.verseCount || 10} verses`;
               return `${ROOM_SOURCE_LABELS[s]}${roomData.book ? ` (${roomData.book})` : ''} · ${(roomData.libraryMode || 'blanks') === 'reference' ? 'Reference' : 'Fill Blanks'}`;
             })()}</div></div>)}
@@ -1009,6 +1057,31 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
                   <button type="button" onClick={() => setMpSlots(mpSlots.map(() => null))} disabled={mpSlots.every((v) => v === null)} className="rounded-2xl border border-iron-800 px-4 py-3 text-xs font-black uppercase tracking-[0.2em] text-ash-400 disabled:opacity-40">Clear</button>
                   <button type="button" onClick={() => mpSubmitAnswer(mpSlots.map((v) => (v === null ? '' : currentQ.options[v])).join(MULTI_BLANK_SEPARATOR))} disabled={!filled} className="btn-primary rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.2em] disabled:cursor-not-allowed disabled:opacity-40">Confirm</button>
                 </div>
+              </div>
+            );
+          })() : currentQ.kind === 'typed' ? (() => {
+            return (
+              <div className="mb-6 space-y-4">
+                {mpFeedback === null ? (
+                  <>
+                    <textarea
+                      value={mpTyped}
+                      autoFocus
+                      rows={3}
+                      onChange={(e) => setMpTyped(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (mpTyped.trim()) mpSubmitAnswer(mpTyped); } }}
+                      placeholder="Type the full answer…"
+                      className="w-full rounded-2xl border border-gold-500/20 bg-neutral-950 p-4 text-left font-serif text-lg text-white outline-none focus:border-gold-400"
+                    />
+                    <div className="text-[11px] text-ash-600">Capitals, punctuation and spacing don’t matter. Press Enter to submit.</div>
+                    <button type="button" onClick={() => mpSubmitAnswer(mpTyped)} disabled={!mpTyped.trim()} className="btn-primary rounded-2xl px-5 py-3 text-sm font-black uppercase tracking-[0.2em] disabled:cursor-not-allowed disabled:opacity-40">Submit</button>
+                  </>
+                ) : mpFeedback === 'incorrect' ? (
+                  <div className="space-y-3 text-left">
+                    {mpTyped.trim() && <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4"><div className="mb-1 text-[11px] font-black uppercase tracking-[0.2em] text-red-300">You wrote</div><div className="font-serif text-lg text-ash-300">{mpTyped}</div></div>}
+                    <div className="rounded-2xl border border-green-500/30 bg-green-500/10 p-4"><div className="mb-1 text-[11px] font-black uppercase tracking-[0.2em] text-green-300">Correct answer</div><div className="font-serif text-lg text-ash-200">{currentQ.blank}</div></div>
+                  </div>
+                ) : null}
               </div>
             );
           })() : currentQ.kind === 'builder' ? (() => {
