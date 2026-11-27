@@ -272,3 +272,47 @@ export const buildExamPool = (mode: ExamMode, rangeId: string): RoomQuestion[] =
   }
   return out;
 };
+
+const wordKey = (w: string) => w.toLowerCase().replace(/[^a-z0-9]+/g, '');
+
+/**
+ * Word-by-word comparison of a typed answer with the real one, to show where the player went wrong.
+ * `typed[i].ok` is false for a word that isn't in the answer (or is out of place); `answer[i].ok` is
+ * false for an answer word the player missed. Punctuation-only tokens (arrows) are never marked.
+ */
+export const diffWords = (typed: string, answer: string) => {
+  const a = typed.split(/\s+/).filter(Boolean);
+  const b = answer.split(/\s+/).filter(Boolean);
+  const ka = a.map(wordKey), kb = b.map(wordKey);
+  const lcs: number[][] = Array.from({ length: a.length + 1 }, () => new Array(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i--) for (let j = b.length - 1; j >= 0; j--) {
+    lcs[i][j] = ka[i] && ka[i] === kb[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1]);
+  }
+  const okA = ka.map((k) => !k), okB = kb.map((k) => !k);
+  let i = 0, j = 0;
+  while (i < a.length && j < b.length) {
+    if (ka[i] && ka[i] === kb[j]) { okA[i] = true; okB[j] = true; i++; j++; }
+    else if (lcs[i + 1][j] >= lcs[i][j + 1]) i++;
+    else j++;
+  }
+  return { typed: a.map((w, n) => ({ w, ok: okA[n] })), answer: b.map((w, n) => ({ w, ok: okB[n] })) };
+};
+
+/** Recovers the correct order of a builder's pieces from its joined answer (the pieces arrive scrambled). */
+export const orderChunks = (chunks: string[], answer: string): string[] | null => {
+  const used = new Array(chunks.length).fill(false);
+  const out: string[] = [];
+  const go = (rest: string): boolean => {
+    if (out.length === chunks.length) return rest === '';
+    for (let i = 0; i < chunks.length; i++) {
+      if (used[i] || !rest.startsWith(chunks[i])) continue;
+      const after = rest.slice(chunks[i].length);
+      if (after !== '' && !after.startsWith(' ')) continue;
+      used[i] = true; out.push(chunks[i]);
+      if (go(after.replace(/^ /, ''))) return true;
+      used[i] = false; out.pop();
+    }
+    return false;
+  };
+  return go(answer) ? out : null;
+};
