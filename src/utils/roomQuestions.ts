@@ -210,4 +210,4 @@ export const buildClassQuizPool = (quiz: ClassQuiz): RoomQuestion[] =>
       ? q.answers.length === 1
         ? { kind: 'choice', prompt: q.prompt, verse: q.verse, options: shuffleArray([q.answers[0], ...q.decoys]), blank: q.answers[0] }
         : { kind: 'multi', prompt: q.prompt, verse: q.verse, options: shuffleArray([...q.answers, ...q.decoys]), answers: q.answers, blank: q.answers.join(MULTI_BLANK_SEPARATOR) }
-      : { kind: 'builder', prompt: 'Put the verse in order.', verse: q.verse, chunks: scrambleChunks(q.chunks), blank: q.chunks.join(' ') });
+      : { kind: 'builder', prompt: q.prompt ?? 'Put the verse in order.', verse: q.verse, chunks: scrambleChunks(q.chunks), blank: q.chunks.join(' ') });
