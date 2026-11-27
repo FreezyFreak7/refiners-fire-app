@@ -11,7 +11,8 @@
 
 export type ClassQuizQuestion =
   | { kind: 'blank'; verse: string; prompt: string; answers: string[]; decoys: string[] }
-  | { kind: 'builder'; verse: string; chunks: string[] };
+  /** `prompt` replaces the default "Put the verse in order." line, for questions that aren't verses. */
+  | { kind: 'builder'; verse: string; chunks: string[]; prompt?: string };
 
 export interface ClassQuiz {
   id: string;
@@ -19,7 +20,9 @@ export interface ClassQuiz {
   questions: ClassQuizQuestion[];
 }
 
-export const CLASS_QUIZZES: ClassQuiz[] = [
+import { EXAM_QUIZZES } from './examQuizzes';
+
+const REVELATION_QUIZZES: ClassQuiz[] = [
   {
     id: 'rev-1-9-20',
     name: 'Revelation 1:9-20',
@@ -69,3 +72,6 @@ export const CLASS_QUIZZES: ClassQuiz[] = [
     ],
   },
 ];
+
+// Revelation passages first (the first entry is the default for a new room), then the exam quizzes.
+export const CLASS_QUIZZES: ClassQuiz[] = [...REVELATION_QUIZZES, ...EXAM_QUIZZES];
