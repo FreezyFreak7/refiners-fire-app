@@ -1,4 +1,5 @@
 import React, { useMemo, useRef, useState } from 'react';
+import { useEnterKey } from '../../utils/useEnterKey';
 import { ArrowLeft, CheckCircle, RotateCcw, Trophy, XCircle } from 'lucide-react';
 import { matchesTypedAnswer, type FillBlanksQuestion, type Quiz, type QuizQuestion, type TypedBlankQuestion, type VerseBuilderQuestion } from '../../utils/quiz';
 
@@ -334,6 +335,9 @@ const QuizPlayer: React.FC<QuizPlayerProps> = ({ quiz, onExit }) => {
     setScore(0);
     setFinished(false);
   };
+
+  // Enter = Next once the question is answered (also from a text answer's input).
+  useEnterKey(answer !== null && !finished, next, true);
 
   if (finished) {
     const pct = total ? Math.round((score / total) * 100) : 0;

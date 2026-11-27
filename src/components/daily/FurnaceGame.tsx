@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useEnterKey } from '../../utils/useEnterKey';
 import { ArrowLeft, Flame, Heart } from 'lucide-react';
 import Leaderboard from './Leaderboard';
 import { loadBible } from '../../utils/bible';
@@ -114,6 +115,8 @@ const FurnaceGame: React.FC<FurnaceGameProps> = ({ user, isMember, profile, onBa
       askNext(streak); // streak already updated in state
     }
   };
+
+  useEnterKey(phase === 'reveal', proceed);
 
   if (loadError) {
     return (

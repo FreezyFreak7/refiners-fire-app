@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEnterKey } from '../../utils/useEnterKey';
 import {
   ArrowLeft,
   Award,
@@ -611,6 +612,14 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     setCorrectCount((prev) => prev + 1);
   };
 
+  // What "Continue" does after a miss. Set when the miss happens, run once.
+  const continueRef = useRef<(() => void) | null>(null);
+  const runContinue = () => {
+    const fn = continueRef.current;
+    continueRef.current = null;
+    fn?.();
+  };
+
   const handleBlankChoice = (choice: string) => {
     if (feedback || currentQuestion?.kind !== 'blanks') return;
 
@@ -635,12 +644,13 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     setFeedback('incorrect');
     setStreak(0);
     setMissedCurrent(true);
-    window.setTimeout(() => {
+    // Stay on the right answer until the player presses Continue (or Enter).
+    continueRef.current = () => {
       setBlankGuesses(nextGuesses);
       setPicked(null);
       if (verseDone) advanceLevel();
       else setFeedback(null);
-    }, 1500);
+    };
   };
 
   const handleAnswer = (isCorrect: boolean, choice?: string) => {
@@ -655,8 +665,8 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
     setFeedback('incorrect');
     setStreak(0);
     setMissedCurrent(true);
-    // Builder misses stay up longer so the player can read the correct order.
-    window.setTimeout(advanceLevel, activeMode === 'builder' ? 3200 : 1800);
+    // A miss stays up so the player can read the right answer; Continue (or Enter) moves on.
+    continueRef.current = advanceLevel;
   };
 
   const handleBuilderClick = (chunk: string) => {
@@ -707,6 +717,8 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
   const questionDone = feedback === 'correct' || (feedback === 'incorrect' && (
     currentQuestion?.kind !== 'blanks' || blankGuesses.length === currentQuestion.answers.length - 1));
   const topRowSets = sets;
+  useEnterKey(feedback === 'incorrect', runContinue);
+  useEnterKey(appState === 'finished', () => setAppState('menu'));
 
   // Every library and every game mode needs the Bible text, so hold the screen until it lands
   // rather than letting Start silently do nothing.
@@ -982,6 +994,9 @@ const GameifiedMemoryGame: React.FC<MemoryGameProps> = ({ onBack, isMember, init
               {feedback === 'correct' && <span className="text-green-400">{missedCurrent ? 'Done' : 'Correct'}</span>}
               {feedback === 'incorrect' && <span className="text-red-400">Wrong</span>}
             </div>
+            {feedback === 'incorrect' && (
+              <button type="button" onClick={runContinue} className="btn-primary mb-4 rounded-2xl px-6 py-3 text-sm font-black uppercase tracking-[0.2em]">Continue <span className="ml-1 text-[10px] opacity-70">↵ Enter</span></button>
+            )}
 
             {currentQuestion.kind === 'blanks' && (
               <div className="w-full max-w-3xl rounded-3xl border border-gold-500/20 bg-soot-900/80 p-2 shadow-2xl ">
