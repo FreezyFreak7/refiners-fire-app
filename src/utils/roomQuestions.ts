@@ -1,6 +1,7 @@
 import type { BibleData } from './bible';
 import { shuffleArray } from './helpers';
 import type { ClassQuiz } from '../data/classQuizzes';
+import { EXAM_ITEMS } from '../data/examQuizzes';
 import { buildWordPool, cleanWord, pickBlankIndexes, pickDistractors } from './blanks';
 
 /**
@@ -53,7 +54,23 @@ export interface MultiBlankRoomQuestion {
   explanation?: string;
 }
 
-export type RoomQuestion = ChoiceRoomQuestion | BuilderRoomQuestion | MultiBlankRoomQuestion;
+/**
+ * Write the full answer: players type it. `blank` is the exact answer; a typed answer counts when it
+ * matches ignoring capitals, punctuation and spacing (see answersMatch).
+ */
+export interface TypedRoomQuestion {
+  kind: 'typed';
+  prompt: string;
+  verse: string;
+  blank: string;
+  explanation?: string;
+}
+
+export type RoomQuestion = ChoiceRoomQuestion | BuilderRoomQuestion | MultiBlankRoomQuestion | TypedRoomQuestion;
+
+/** Compares a typed answer to the real one, ignoring capitals, punctuation, arrows and spacing. */
+const compactAnswer = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '');
+export const answersMatch = (typed: string, answer: string) => compactAnswer(typed) !== '' && compactAnswer(typed) === compactAnswer(answer);
 
 export const MULTI_BLANK_SEPARATOR = ' | ';
 
@@ -64,6 +81,8 @@ export const BUILDER_TIME_SCALE = 1.5;
 export const roomQuestionMs = (q: RoomQuestion | undefined, baseMs: number) => {
   if (q?.kind === 'builder') return Math.round(baseMs * BUILDER_TIME_SCALE);
   if (q?.kind === 'multi') return Math.round(baseMs * (1 + 0.4 * Math.max(0, q.answers.length - 1)));
+  // Typing takes as long as the answer is: a base allowance plus about 0.35s per character.
+  if (q?.kind === 'typed') return Math.round(baseMs * 1.5 + q.blank.length * 350);
   return baseMs;
 };
 
@@ -77,6 +96,7 @@ export type RoomSource =
   | 'gospels'
   | 'alpha_omega'
   | 'class'
+  | 'exam'
   | 'quiz';
 
 export const ROOM_SOURCE_LABELS: Record<RoomSource, string> = {
@@ -86,6 +106,7 @@ export const ROOM_SOURCE_LABELS: Record<RoomSource, string> = {
   gospels: 'The Gospels',
   alpha_omega: 'Alpha & Omega',
   class: 'Class Quizzes',
+  exam: 'Graduation Exam',
   quiz: 'My Quiz',
 };
 
@@ -211,3 +232,43 @@ export const buildClassQuizPool = (quiz: ClassQuiz): RoomQuestion[] =>
         ? { kind: 'choice', prompt: q.prompt, verse: q.verse, options: shuffleArray([q.answers[0], ...q.decoys]), blank: q.answers[0] }
         : { kind: 'multi', prompt: q.prompt, verse: q.verse, options: shuffleArray([...q.answers, ...q.decoys]), answers: q.answers, blank: q.answers.join(MULTI_BLANK_SEPARATOR) }
       : { kind: 'builder', prompt: q.prompt ?? 'Put the verse in order.', verse: q.verse, chunks: scrambleChunks(q.chunks), blank: q.chunks.join(' ') });
+
+export type ExamMode = 'builder' | 'blanks' | 'write' | 'mix';
+export const EXAM_MODE_LABELS: Record<ExamMode, string> = { builder: 'Builder', blanks: 'Fill in the Blanks', write: 'Write the Answer', mix: 'Mix' };
+/** Which questions of the exam a room plays. */
+export const EXAM_RANGES: { id: string; label: string; from: number; to: number }[] = [
+  { id: 'all', label: 'All 40 questions', from: 1, to: 40 },
+  { id: '1-10', label: 'Questions 1–10', from: 1, to: 10 },
+  { id: '11-20', label: 'Questions 11–20', from: 11, to: 20 },
+  { id: '21-30', label: 'Questions 21–30', from: 21, to: 30 },
+  { id: '31-40', label: 'Questions 31–40', from: 31, to: 40 },
+];
+
+export const examItemsInRange = (rangeId: string) => {
+  const r = EXAM_RANGES.find((x) => x.id === rangeId) || EXAM_RANGES[0];
+  return EXAM_ITEMS.filter((it) => it.n >= r.from && it.n <= r.to);
+};
+
+/** The Graduation Exam as room questions, in exam order. In Mix each answer is asked one random way. */
+export const buildExamPool = (mode: ExamMode, rangeId: string): RoomQuestion[] => {
+  const out: RoomQuestion[] = [];
+  for (const it of examItemsInRange(rangeId)) {
+    const verse = `Exam Q${it.n}${it.label}`;
+    const ways: Exclude<ExamMode, 'mix'>[] = mode === 'mix' ? (it.chunks.length ? ['blanks', 'write', 'builder'] : ['blanks', 'write']) : [mode];
+    const way = ways[Math.floor(Math.random() * ways.length)];
+    if (way === 'blanks') {
+      out.push(it.blanks.length === 1
+        ? { kind: 'choice', prompt: it.blankPrompt, verse, options: shuffleArray([it.blanks[0], ...it.decoys]), blank: it.blanks[0] }
+        : { kind: 'multi', prompt: it.blankPrompt, verse, options: shuffleArray([...it.blanks, ...it.decoys]), answers: it.blanks, blank: it.blanks.join(MULTI_BLANK_SEPARATOR) });
+    } else if (way === 'write') {
+      out.push({ kind: 'typed', prompt: it.ask, verse, blank: it.answer });
+    } else if (it.chunks.length) {
+      // Builder is skipped for answers too short to build; long ones are asked in several parts.
+      it.chunks.forEach((group, g) => {
+        const suffix = it.chunks.length > 1 ? ` (part ${g + 1} of ${it.chunks.length})` : '';
+        out.push({ kind: 'builder', prompt: `Put the answer in order: ${it.ask}${suffix}`, verse: verse + suffix, chunks: scrambleChunks(group), blank: group.join(' ') });
+      });
+    }
+  }
+  return out;
+};
