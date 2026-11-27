@@ -10,6 +10,7 @@ import { acts } from '../../data/acts';
 import { chapters } from '../../data/chapters';
 import { CLASS_QUIZZES } from '../../data/classQuizzes';
 import { shuffleArray } from '../../utils/helpers';
+import { useEnterKey } from '../../utils/useEnterKey';
 import { loadBible, type BibleData } from '../../utils/bible';
 import {
   answersMatch,
@@ -279,12 +280,17 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
   const [mpSlots, setMpSlots] = useState<(number | null)[]>([]);
   // Live-room write-the-answer question: what this player has typed so far.
   const [mpTyped, setMpTyped] = useState('');
+  // After a miss (or a timeout) the player stays on the correct answer until they press Continue / Enter.
+  const [mpHold, setMpHold] = useState(false);
 
   const totalPossibleScore = activeQuestions.length
     ? activeQuestions.length * 10 + activeQuestions.length * (activeQuestions.length - 1)
     : 0;
 
   const feedbackLabel = feedback === 'correct' ? 'Correct' : feedback === 'incorrect' ? 'Wrong' : null;
+  const spContinueButton = feedback === 'incorrect' ? (
+    <div className="mb-6"><button type="button" onClick={() => continueAfterMiss()} className="btn-primary rounded-2xl px-6 py-3 text-sm font-black uppercase tracking-[0.2em]">Continue <span className="ml-1 text-[10px] opacity-70">↵ Enter</span></button></div>
+  ) : null;
 
   // --- MULTIPLAYER LOGIC ---
   // No 0/O or 1/I/L, so a code read aloud or off a screen can't be mistyped.
@@ -427,6 +433,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
     setMpLastGain(0);
     setMpPlaced([]);
     setMpTyped('');
+    setMpHold(false);
     const q = roomData?.questions?.[idx];
     setMpSlots(q?.kind === 'multi' ? q.answers.map(() => null) : []);
     setMpTimeLeft(mpQuestionMs);
@@ -439,6 +446,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
         if (!mpAnsweredRef.current) {
           mpAnsweredRef.current = true;
           setMpFeedback('incorrect');
+          setMpHold(true);
           const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
           updateDoc(sessionRef, {
             [`players.${user.uid}.lastAnswered`]: idx,
@@ -574,6 +582,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
     const currentQ = activeQuestions[roomData.questionIndex];
     const isCorrect = currentQ.kind === 'typed' ? answersMatch(String(answer), currentQ.blank) : answer === currentQ.blank;
     setMpFeedback(isCorrect ? 'correct' : 'incorrect');
+    if (!isCorrect) setMpHold(true);
 
     // Faster answers keep more of the speed bonus; correct-but-slow still earns the base.
     const fraction = mpQuestionMs > 0 ? Math.max(0, Math.min(1, mpTimeLeft / mpQuestionMs)) : 0;
@@ -608,6 +617,20 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
     const sessionRef = doc(db, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
     await updateDoc(sessionRef, { phase: 'scoreboard' });
   };
+
+  // Enter = the main button on screen: Continue after a miss, Next Question on the scoreboard (host),
+  // Back to Room on the final standings (host).
+  const liveEnterActive = appState === 'multiplayer_room' && (
+    (roomData?.status === 'playing' && (mpHold || (isHost && roomData?.phase === 'scoreboard'))) ||
+    (roomData?.status === 'finished' && isHost)
+  );
+  useEnterKey(liveEnterActive, () => {
+    if (roomData?.status === 'finished') { mpReturnToRoom(); return; }
+    if (mpHold) { setMpHold(false); return; }
+    if (isHost && roomData?.phase === 'scoreboard') mpNextQuestion();
+  });
+  useEnterKey(appState === 'finished', () => setAppState('chapterSelect'));
+  useEnterKey(appState === 'playing' && feedback === 'incorrect', () => continueAfterMiss());
 
   const mpSelectChapter = async (chapId: any) => {
     const sessionRef = doc(db as any, 'artifacts', appId, 'public', 'data', 'sessions', roomCode);
@@ -683,14 +706,16 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
       }, 1500);
     } else {
       setFeedback('incorrect'); setStreak(0); setMissedCurrent(true);
-      // A miss shows the answer, then moves on. No free retry; the question scores 0.
-      setTimeout(() => {
-        if (currentLevel < activeQuestions.length - 1) {
-          setCurrentLevel(currentLevel + 1); setFeedback(null); setMissedCurrent(false);
-          if (gameMode === 'builder') initializeBuilderLevel(currentLevel + 1, activeQuestions);
-        } else setAppState('finished');
-      }, gameMode === 'builder' ? 3200 : 2000);
+      // A miss shows the answer and waits: Continue (or Enter) moves on. No free retry; the question scores 0.
     }
+  };
+
+  const continueAfterMiss = () => {
+    if (feedback !== 'incorrect') return;
+    if (currentLevel < activeQuestions.length - 1) {
+      setCurrentLevel(currentLevel + 1); setFeedback(null); setMissedCurrent(false);
+      if (gameMode === 'builder') initializeBuilderLevel(currentLevel + 1, activeQuestions);
+    } else setAppState('finished');
   };
 
   // Moves the tapped chunk (by position, so repeated chunks are handled one at a time) into the line.
@@ -964,7 +989,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
       const sorted = [...players].sort((a, b) => (b?.[1]?.score || 0) - (a?.[1]?.score || 0));
 
       // Between every question the whole room sees the standings; the host advances from here.
-      if (phase === 'scoreboard') {
+      if (phase === 'scoreboard' && !mpHold) {
         return (
           <div className="w-full max-w-md rounded-3xl border border-gold-500/25 bg-soot-900/60 p-2 text-center shadow-2xl ">
             <div className="rounded-[1.5rem] border border-iron-800/60 bg-gradient-to-b from-gold-700/12 via-soot-950/50 to-soot-900/80 p-8 space-y-6">
@@ -1119,7 +1144,12 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
           })() : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">{(currentQ.options || []).map((opt: any, i: any) => (<button key={i} onClick={() => mpSubmitAnswer(opt)} disabled={mpFeedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${mpFeedback === 'correct' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white' : mpFeedback === 'incorrect' && opt === currentQ.blank ? 'bg-green-600 border-green-500 text-white opacity-50' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>))}</div>
           )}
-          {mpFeedback ? (
+          {mpHold ? (
+            <div className="space-y-2">
+              <button type="button" onClick={() => setMpHold(false)} className="btn-primary rounded-2xl px-6 py-3 text-sm font-black uppercase tracking-[0.2em]">Continue <span className="ml-1 text-[10px] opacity-70">↵ Enter</span></button>
+              <div className="text-xs text-ash-600 uppercase tracking-[0.2em]">Take your time reading the answer</div>
+            </div>
+          ) : mpFeedback ? (
             <div className="text-xs text-ash-600 uppercase tracking-[0.2em]">Scoreboard when everyone's in…</div>
           ) : (
             <div className="h-4" />
@@ -1303,7 +1333,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
                   <div className="rounded-2xl border border-iron-800/60 bg-soot-900/70 p-6 sm:p-8 relative overflow-hidden text-center">
                     <div className="mb-8"><span className="text-gold-400 font-mono text-xs uppercase tracking-widest bg-gold-700/15 px-3 py-1 rounded-full border border-gold-700/40">Rev {activeQuestions[currentLevel].verse}</span></div>
                     <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">{activeQuestions[currentLevel].textBefore} <span className={`inline-block mx-2 px-3 py-1 rounded-lg border-b-2 font-bold ${feedback === 'correct' ? 'bg-green-900/50 border-green-500 text-green-200' : feedback === 'incorrect' ? 'bg-red-900/50 border-red-500 text-red-200' : 'bg-neutral-800/50 border-gold-500/50 text-transparent min-w-[80px]'}`}>{feedback === 'correct' || feedback === 'incorrect' ? activeQuestions[currentLevel].blank : '_____'}</span> {activeQuestions[currentLevel].textAfter}</div>
-                    {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
+                    {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}{spContinueButton}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: any, i: any) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].blank)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-medium border-2 transition-all ${feedback === 'correct' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white' : feedback === 'incorrect' && opt === activeQuestions[currentLevel].blank ? 'bg-green-600 border-green-500 text-white' : 'bg-neutral-800 border-neutral-700 hover:border-gold-500'}`}>{opt}</button>))}</div>
                   </div>
                 </div>
@@ -1312,7 +1342,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
                 <div className="w-full max-w-3xl bg-neutral-900 p-6 sm:p-8 rounded-3xl border border-neutral-700 shadow-2xl relative overflow-hidden text-center">
                   <div className="mb-8"><span className="text-purple-400 font-mono text-xs uppercase tracking-widest bg-purple-950/30 px-3 py-1 rounded-full border border-purple-900/50">Identify Reference</span></div>
                   <div className="text-xl sm:text-2xl font-serif text-ash-200 leading-relaxed mb-10">"{activeQuestions[currentLevel].text}"</div>
-                  {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
+                  {feedbackLabel && <div className={`mb-6 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}{spContinueButton}
                   <div className="grid grid-cols-2 gap-3">{(activeQuestions[currentLevel].options || []).map((opt: string, i: number) => (<button key={i} onClick={() => handleSinglePlayerAnswer(opt === activeQuestions[currentLevel].correct)} disabled={feedback !== null} className={`p-4 rounded-xl text-lg font-mono font-bold border-2 ${feedback && opt === activeQuestions[currentLevel].correct ? 'bg-green-600 border-green-500' : 'bg-neutral-800 border-neutral-700 hover:border-purple-500'}`}>Rev {opt}</button>))}</div>
                 </div>
               )}
@@ -1322,7 +1352,7 @@ const RevelationGame = ({ onBack, username, user, authLoading, isMember, initial
                     {builderData.selected.map((chunk, i) => (<div key={i} className="inline-flex items-center gap-1 rounded-lg border border-gold-500/30 bg-gold-500/15 px-2 py-2 text-gold-100 shadow-lg animate-in zoom-in duration-200"><button type="button" onClick={() => handleBuilderMove(i, -1)} disabled={feedback !== null || i === 0} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">←</button><span className="px-1 py-1 font-medium">{chunk}</span><button type="button" onClick={() => handleBuilderMove(i, 1)} disabled={feedback !== null || i === builderData.selected.length - 1} className="rounded-md border border-iron-800 bg-soot-900/50 px-2 py-1 text-[10px] font-black text-gold-300 disabled:cursor-not-allowed disabled:opacity-30">→</button></div>))}
                     {builderData.selected.length > 0 && !feedback && (<button onClick={handleBuilderUndo} className="absolute bottom-4 right-4 text-xs text-ash-500 hover:text-white underline">Undo Last</button>)}
                   </div>
-                  {feedbackLabel && <div className={`mb-4 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}
+                  {feedbackLabel && <div className={`mb-4 inline-flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-black uppercase tracking-[0.25em] ${feedback === 'correct' ? 'border-green-500/40 bg-green-500/15 text-green-200' : 'border-red-500/40 bg-red-500/15 text-red-200'}`}>{feedbackLabel}</div>}{spContinueButton}
                   {feedback === 'incorrect' && (
                     <div role="status" className="mb-6 w-full rounded-2xl border border-green-600/40 bg-green-900/20 p-4 text-left">
                       <div className="mb-1 text-[11px] font-black uppercase tracking-[0.25em] text-green-400">Correct order</div>

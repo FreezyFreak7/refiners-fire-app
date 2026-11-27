@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEnterKey } from '../../utils/useEnterKey';
 import { ArrowLeft, Flame, Loader2, Trophy } from 'lucide-react';
 import Leaderboard from './Leaderboard';
 import { loadBible } from '../../utils/bible';
@@ -130,6 +131,8 @@ const DailyChallenge: React.FC<DailyChallengeProps> = ({
     setPhase('done');
     setResult({ score, versesCorrect: correctCount });
   };
+
+  useEnterKey(phase === 'reveal', next);
 
   if (loadError) {
     return (
