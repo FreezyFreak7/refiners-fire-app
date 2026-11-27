@@ -1,5 +1,5 @@
 /**
- * Exam quizzes for Completion_Answer_English.pdf (40 questions, 106 sub-answers). Answers are
+ * Exam quizzes for Completion_Answer_English.pdf (40 questions, 100 sub-answers; five answers that list separate items, Q7③, Q17③, Q19①, Q28②, Q31②, are split so there are 106 prompts). Answers are
  * word-for-word from the exam's answer key; the prompts are short forms of the exam questions.
  * Three styles, each in four parts of ten questions:
  *   Fill the Blanks  the exact answer with its key terms blanked, filled from a word bank
